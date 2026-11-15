@@ -24,6 +24,10 @@ class DotWidget : AppWidgetProvider() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             ACTION_TOGGLE, ACTION_NEXT -> {
+                // Reject unauthorized broadcasts from third-party apps that lack the per-install widget token.
+                val token = intent.getStringExtra(EXTRA_TOKEN)
+                if (token == null || token != getToken(context)) return
+
                 val pending = goAsync()
                 RemoteControl.send(context, done = { pending.finish() }) { c ->
                     if (intent.action == ACTION_NEXT) c.seekToNext() else if (c.isPlaying) c.pause() else c.play()
@@ -34,9 +38,23 @@ class DotWidget : AppWidgetProvider() {
     }
 
     companion object {
-        private const val ACTION_TOGGLE = "com.dj.dot.widget.TOGGLE"
-        private const val ACTION_NEXT = "com.dj.dot.widget.NEXT"
+        const val ACTION_TOGGLE = "com.dj.dot.widget.TOGGLE"
+        const val ACTION_NEXT = "com.dj.dot.widget.NEXT"
+        const val EXTRA_TOKEN = "com.dj.dot.widget.TOKEN"
+        private const val PREFS_NAME = "widget_security"
+        private const val KEY_TOKEN = "token"
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+        @Synchronized
+        fun getToken(context: Context): String {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            var token = prefs.getString(KEY_TOKEN, null)
+            if (token == null) {
+                token = java.util.UUID.randomUUID().toString()
+                prefs.edit().putString(KEY_TOKEN, token).apply()
+            }
+            return token
+        }
 
         /** Redraws every placed widget from the engine's current state. Cheap no-op when none are placed. */
         fun push(context: Context) {
@@ -66,7 +84,8 @@ class DotWidget : AppWidgetProvider() {
         }
 
         private fun broadcast(context: Context, action: String, code: Int) = PendingIntent.getBroadcast(
-            context, code, Intent(context, DotWidget::class.java).setAction(action),
+            context, code,
+            Intent(context, DotWidget::class.java).setAction(action).putExtra(EXTRA_TOKEN, getToken(context)),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
     }
