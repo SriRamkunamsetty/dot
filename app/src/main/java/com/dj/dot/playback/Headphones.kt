@@ -3,6 +3,7 @@ package com.dj.dot.playback
 import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothA2dp
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
@@ -11,6 +12,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.media.AudioManager
 import android.os.Build
 import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
@@ -66,26 +68,59 @@ class Headphones(private val context: Context) {
         }
     }
 
-    /** Asks the A2DP profile which device is playing and reads its battery. */
+    /**
+     * Queries connected audio devices across A2DP and LE Audio (API 33+),
+     * matching against active audio outputs to pick the device currently playing.
+     */
     fun refresh() {
         if (!hasPermission()) return
         val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter ?: return
-        runCatching {
-            adapter.getProfileProxy(context, object : BluetoothProfile.ServiceListener {
-                override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
-                    val device = runCatching { proxy.connectedDevices.firstOrNull() }.getOrNull()
-                    _connected.value = device?.let { d ->
-                        Info(
-                            runCatching { (if (Build.VERSION.SDK_INT >= 30) d.alias else null) ?: d.name }.getOrNull() ?: "Earphones",
-                            batteryOf(d),
-                            runCatching { d.address }.getOrNull(),
-                        )
-                    }
-                    adapter.closeProfileProxy(profile, proxy)
+        val profilesToQuery = if (Build.VERSION.SDK_INT >= 33) {
+            listOf(BluetoothProfile.A2DP, BluetoothProfile.LE_AUDIO)
+        } else {
+            listOf(BluetoothProfile.A2DP)
+        }
+        val allConnected = mutableListOf<BluetoothDevice>()
+        var pending = profilesToQuery.size
+
+        fun checkComplete() {
+            if (pending > 0) return
+            val audioManager = context.getSystemService(AudioManager::class.java)
+            val activeOutputs = audioManager?.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                ?.mapNotNull { it.address.takeIf { addr -> !addr.isNullOrEmpty() } }
+                ?.toSet() ?: emptySet()
+
+            val chosenAddress = pickActiveDevice(allConnected.mapNotNull { it.address }, activeOutputs)
+            val chosen = allConnected.firstOrNull { it.address == chosenAddress }
+            _connected.value = chosen?.let { d ->
+                Info(
+                    runCatching { (if (Build.VERSION.SDK_INT >= 30) d.alias else null) ?: d.name }.getOrNull() ?: "Earphones",
+                    batteryOf(d),
+                    runCatching { d.address }.getOrNull(),
+                )
+            }
+        }
+
+        for (profile in profilesToQuery) {
+            val listener = object : BluetoothProfile.ServiceListener {
+                override fun onServiceConnected(p: Int, proxy: BluetoothProfile) {
+                    val devices = runCatching { proxy.connectedDevices }.getOrNull() ?: emptyList()
+                    allConnected.addAll(devices)
+                    adapter.closeProfileProxy(p, proxy)
+                    pending--
+                    checkComplete()
                 }
 
-                override fun onServiceDisconnected(profile: Int) = Unit
-            }, BluetoothProfile.A2DP)
+                override fun onServiceDisconnected(p: Int) {
+                    pending--
+                    checkComplete()
+                }
+            }
+            val started = runCatching { adapter.getProfileProxy(context, listener, profile) }.getOrDefault(false)
+            if (!started) {
+                pending--
+                checkComplete()
+            }
         }
     }
 
@@ -94,8 +129,20 @@ class Headphones(private val context: Context) {
         device.javaClass.getMethod("getBatteryLevel").invoke(device) as Int
     }.getOrNull()?.takeIf { it in 0..100 }
 
-    private companion object {
+    companion object {
         const val ACTION_BATTERY_LEVEL_CHANGED = "android.bluetooth.device.action.BATTERY_LEVEL_CHANGED"
         const val EXTRA_BATTERY_LEVEL = "android.bluetooth.device.extra.BATTERY_LEVEL"
+
+        /**
+         * Picks the active audio device among connected devices by matching against
+         * active audio output addresses, falling back to the first connected device.
+         */
+        fun pickActiveDevice(
+            connectedAddresses: List<String>,
+            activeOutputAddresses: Set<String>,
+        ): String? {
+            if (connectedAddresses.isEmpty()) return null
+            return connectedAddresses.firstOrNull { it in activeOutputAddresses } ?: connectedAddresses.first()
+        }
     }
 }
