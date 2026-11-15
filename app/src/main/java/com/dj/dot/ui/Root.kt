@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import java.util.concurrent.atomic.AtomicLong
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -90,7 +91,7 @@ class AppState {
     var nowPlaying by mutableStateOf(false)
     var party by mutableStateOf(false)
     var bedside by mutableStateOf(false)
-    var lastTouch by mutableStateOf(0L)
+    val lastTouch = AtomicLong(android.os.SystemClock.uptimeMillis())
     var menu by mutableStateOf<SongMenu?>(null)
     var addToPlaylist by mutableStateOf<List<Song>?>(null)
 
@@ -176,7 +177,7 @@ private fun MainUi() {
                     awaitPointerEventScope {
                         while (true) {
                             awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
-                            app.lastTouch = android.os.SystemClock.uptimeMillis()
+                            app.lastTouch.set(android.os.SystemClock.uptimeMillis())
                         }
                     }
                 },
@@ -315,12 +316,18 @@ private fun BedsideWhenCharging(app: AppState) {
         onStopOrDispose { context.unregisterReceiver(receiver) }
     }
 
-    LaunchedEffect(charging, enabled, app.lastTouch, app.bedside, app.party) {
+    LaunchedEffect(charging, enabled, app.bedside, app.party) {
         if (!charging && autoOpened) { app.bedside = false; autoOpened = false }
         if (charging && enabled && !app.bedside && !app.party) {
-            delay(60_000)
-            app.bedside = true
-            autoOpened = true
+            while (true) {
+                val idleMs = android.os.SystemClock.uptimeMillis() - app.lastTouch.get()
+                if (idleMs >= 60_000) {
+                    app.bedside = true
+                    autoOpened = true
+                    break
+                }
+                delay((60_000 - idleMs).coerceAtLeast(1_000))
+            }
         }
     }
 }
