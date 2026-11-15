@@ -1,6 +1,8 @@
 package com.dj.dot.ui
 
 import android.content.Context
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.dj.dot.DotApp
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.composed
 import androidx.compose.animation.core.animateFloatAsState
@@ -449,19 +451,28 @@ object ArtLoader {
     private val cache = object : LruCache<String, ImageBitmap>(32 * 1024 * 1024) {
         override fun sizeOf(key: String, value: ImageBitmap) = value.width * value.height * 4
     }
-    private val missing = Collections.synchronizedSet(HashSet<String>())
+    private val missing = Collections.synchronizedMap(LinkedHashMap<String, Long>())
+    private const val RETRY_AFTER_MS = 30_000L
     private val io = Dispatchers.IO.limitedParallelism(4)
 
     fun cached(key: String): ImageBitmap? = cache.get(key)
 
+    fun clearMissing() {
+        missing.clear()
+    }
+
     suspend fun load(context: Context, song: Song, key: String, px: Int): ImageBitmap? {
         cache.get(key)?.let { return it }
-        if (key in missing) return null
+        val failedAt = missing[key]
+        if (failedAt != null) {
+            if (android.os.SystemClock.uptimeMillis() - failedAt < RETRY_AFTER_MS) return null
+            missing.remove(key)
+        }
         return withContext(io) {
             runCatching { context.contentResolver.loadThumbnail(song.uri, Size(px, px), null).asImageBitmap() }
                 .getOrNull()
                 ?.also { cache.put(key, it) }
-                ?: run { missing += key; null }
+                ?: run { missing[key] = android.os.SystemClock.uptimeMillis(); null }
         }
     }
 }
@@ -475,7 +486,8 @@ fun rememberArtTint(song: Song?): Color? {
     val context = LocalContext.current
     val key = song?.let { "${it.albumId}_192" }
     var tint by remember(key) { mutableStateOf<Color?>(null) }
-    LaunchedEffect(key) {
+    val lib by DotApp.instance.library.data.collectAsStateWithLifecycle()
+    LaunchedEffect(key, lib) {
         if (song == null || key == null) return@LaunchedEffect
         val cover = ArtLoader.load(context, song, key, 192) ?: return@LaunchedEffect
         tint = withContext(Dispatchers.Default) { glowOf(cover) }
@@ -502,7 +514,8 @@ fun Art(song: Song?, modifier: Modifier = Modifier, px: Int = 192, shape: Shape 
     val bucket = when { px <= 200 -> 192; px <= 640 -> 600; else -> 1080 }
     val key = song?.let { "${it.albumId}_$bucket" }
     var bitmap by remember(key) { mutableStateOf(key?.let(ArtLoader::cached)) }
-    LaunchedEffect(key) {
+    val lib by DotApp.instance.library.data.collectAsStateWithLifecycle()
+    LaunchedEffect(key, lib) {
         if (bitmap == null && song != null && key != null) bitmap = ArtLoader.load(context, song, key, bucket)
     }
     Box(modifier.clip(shape).background(Dot.Surface2), contentAlignment = Alignment.Center) {
