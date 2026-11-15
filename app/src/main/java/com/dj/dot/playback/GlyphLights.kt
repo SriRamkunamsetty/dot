@@ -41,7 +41,9 @@ class GlyphLights(
     private var manager: GlyphManager? = null
     private var ready = false
     private var connecting = false
+    private var desiredMode = GlyphMode.Off
     private var loop: Job? = null
+    private var idleJob: Job? = null
     private var listening = false
     private val last = IntArray(LEDS) { -1 }
     private val previewBuffers = arrayOf(FloatArray(LEDS), FloatArray(LEDS))
@@ -60,13 +62,15 @@ class GlyphLights(
         if (!supported) return
         scope.launch {
             combine(playing, settings.glyphMode.flow) { p, m -> p to GlyphMode.entries.getOrElse(m) { GlyphMode.Off } }
-                .collect { (isPlaying, mode) -> if (isPlaying && mode != GlyphMode.Off) run(mode) else idle() }
+                .collect { (isPlaying, mode) ->
+                    val target = if (isPlaying) mode else GlyphMode.Off
+                    if (target != GlyphMode.Off) run(target) else idle()
+                }
         }
     }
 
-    private fun connect(onReady: () -> Unit) {
-        if (ready) return onReady()
-        if (connecting) return
+    private fun connect() {
+        if (ready || connecting) return
         connecting = true
         val m = manager ?: GlyphManager.getInstance(context.applicationContext).also { manager = it }
         runCatching {
@@ -78,18 +82,29 @@ class GlyphLights(
                             m.openSession()
                             ready = true
                             unavailable.value = false
-                            onReady()
+                            val target = desiredMode
+                            if (target != GlyphMode.Off) {
+                                startAnimation(target)
+                            } else {
+                                scheduleCloseSession(immediate = settings.glyphMode.value == GlyphMode.Off.ordinal)
+                            }
                         }.onFailure {
                             Log.w(TAG, "Glyph session failed", it)
                             unavailable.value = true
+                            ready = false
+                            runCatching { m.unInit() }
+                            manager = null
                         }
                         connecting = false
                     }
                 }
 
                 override fun onServiceDisconnected(name: ComponentName) {
-                    ready = false
-                    connecting = false
+                    scope.launch {
+                        ready = false
+                        connecting = false
+                        manager = null
+                    }
                 }
             })
         }.onFailure {
@@ -100,11 +115,23 @@ class GlyphLights(
     }
 
     private fun run(mode: GlyphMode) {
-        loop?.cancel()
-        connect {
-            if (!listening) { spectrum.acquire(needsWave = false); listening = true }
-            loop = scope.launch { animate(mode) }
+        cancelIdle()
+        desiredMode = mode
+        if (ready) {
+            startAnimation(mode)
+        } else {
+            connect()
         }
+    }
+
+    private fun startAnimation(mode: GlyphMode) {
+        cancelIdle()
+        loop?.cancel()
+        if (!listening) {
+            spectrum.acquire(needsWave = false)
+            listening = true
+        }
+        loop = scope.launch { animate(mode) }
     }
 
     private suspend fun CoroutineScope.animate(mode: GlyphMode) {
@@ -165,15 +192,46 @@ class GlyphLights(
         }
     }
 
+    private fun cancelIdle() {
+        idleJob?.cancel()
+        idleJob = null
+    }
+
     private fun idle() {
+        cancelIdle()
+        desiredMode = GlyphMode.Off
         loop?.cancel()
         loop = null
-        if (listening) { spectrum.release(needsWave = false); listening = false }
+        if (listening) {
+            spectrum.release(needsWave = false)
+            listening = false
+        }
         preview = FloatArray(LEDS)
-        scope.launch {
+        val immediate = settings.glyphMode.value == GlyphMode.Off.ordinal
+        scheduleCloseSession(immediate)
+    }
+
+    private fun scheduleCloseSession(immediate: Boolean) {
+        cancelIdle()
+        idleJob = scope.launch {
             runCatching { manager?.turnOff() }
             last.fill(-1)
+            if (!immediate) {
+                delay(IDLE_TIMEOUT_MS)
+            }
+            if (desiredMode == GlyphMode.Off && ready) {
+                closeSession()
+            }
         }
+    }
+
+    private fun closeSession() {
+        val m = manager ?: return
+        ready = false
+        connecting = false
+        runCatching { m.closeSession() }
+        runCatching { m.unInit() }
+        manager = null
     }
 
     private companion object {
@@ -182,5 +240,6 @@ class GlyphLights(
         const val MAX = 4095
         const val FRAME_MS = 50L
         const val LATENCY_NS = 200_000_000L
+        const val IDLE_TIMEOUT_MS = 5_000L
     }
 }
