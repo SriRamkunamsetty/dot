@@ -152,6 +152,7 @@ class DotEngine(
     private val players = arrayOf(newPlayer(0), newPlayer(1))
     private var a = 0
     private val active: ExoPlayer get() = players[a]
+    private val spare: ExoPlayer get() = players[1 - a]
     /** Mirrors the active player's playlist; edited in place so queue changes stay O(change). */
     private var items: MutableList<MediaItem> = ArrayList()
     private var originalQueue: List<Song>? = null
@@ -366,12 +367,14 @@ class DotEngine(
         setQueue(list)
         _state.value = _state.value.copy(shuffle = shuffle)
         if (fade) {
+            active.setMediaItems(items, index, 0)
             crossfadeTo(index, settings.skipFadeMs.value.toLong())
         } else {
             cancelFade()
             active.setMediaItems(items, index, 0)
             active.repeatMode = _state.value.repeat
             active.prepare()
+            spare.setMediaItems(items, index, 0)
             publish()
             play()
         }
@@ -492,7 +495,7 @@ class DotEngine(
         val added = songs.map { it.toMediaItem() }
         items.addAll(at, added)
         _state.value = _state.value.copy(queue = _state.value.queue.toMutableList().apply { addAll(at, songs) })
-        active.addMediaItems(at, added)
+        players.forEach { it.addMediaItems(at, added) }
         publish()
     }
 
@@ -501,7 +504,7 @@ class DotEngine(
         val added = songs.map { it.toMediaItem() }
         items.addAll(added)
         _state.value = _state.value.copy(queue = _state.value.queue + songs)
-        active.addMediaItems(added)
+        players.forEach { it.addMediaItems(added) }
         publish()
     }
 
@@ -509,7 +512,7 @@ class DotEngine(
         if (index == _state.value.index || index !in items.indices) return
         items.removeAt(index)
         _state.value = _state.value.copy(queue = _state.value.queue.toMutableList().apply { removeAt(index) })
-        active.removeMediaItem(index)
+        players.forEach { it.removeMediaItem(index) }
         publish()
     }
 
@@ -517,7 +520,7 @@ class DotEngine(
         if (from !in items.indices || to !in items.indices || from == to) return
         items.add(to, items.removeAt(from))
         _state.value = _state.value.copy(queue = _state.value.queue.toMutableList().apply { add(to, removeAt(from)) })
-        active.moveMediaItem(from, to)
+        players.forEach { it.moveMediaItem(from, to) }
         publish()
     }
 
@@ -613,7 +616,11 @@ class DotEngine(
         gain[inI] = 0f
         applyVolumes()
         inc.pauseAtEndOfMediaItems = false
-        inc.setMediaItems(items, index, 0)
+        if (inc.mediaItemCount == items.size) {
+            inc.seekTo(index, 0)
+        } else {
+            inc.setMediaItems(items, index, 0)
+        }
         inc.repeatMode = _state.value.repeat
         inc.playbackParameters = playbackParams()
         inc.prepare()
@@ -707,6 +714,7 @@ class DotEngine(
         if (idx > 0) p.removeMediaItems(0, idx)
         if (newIndex > 0) p.addMediaItems(0, items.subList(0, newIndex))
         if (newIndex + 1 < items.size) p.addMediaItems(newIndex + 1, items.subList(newIndex + 1, items.size))
+        spare.setMediaItems(items, newIndex, 0)
         publish()
     }
 
@@ -819,6 +827,8 @@ class DotEngine(
         active.repeatMode = settings.repeat.value
         active.setMediaItems(items, index, settings.queuePos.value)
         active.prepare()
+        spare.repeatMode = settings.repeat.value
+        spare.setMediaItems(items, index, 0)
         publish()
         refreshLyrics(null)
     }
