@@ -220,12 +220,15 @@ fun SettingsScreen() {
 private fun isUnrestricted(context: Context) =
     context.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(context.packageName)
 
-@SuppressLint("BatteryLife")
 private fun requestUnrestricted(context: Context) {
     runCatching {
-        context.startActivity(
-            Intent(AndroidSettings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${context.packageName}")),
-        )
+        context.startActivity(Intent(AndroidSettings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+    }.onFailure {
+        runCatching {
+            context.startActivity(
+                Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")),
+            )
+        }
     }
 }
 
