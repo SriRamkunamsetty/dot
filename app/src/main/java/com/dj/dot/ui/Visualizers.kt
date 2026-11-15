@@ -29,6 +29,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.PointMode
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.withTransform
@@ -152,6 +154,9 @@ private fun BeatReadout(state: VizState) {
 /** Bars of dots rising from the bottom; the peak of a loud band glows red. */
 @Composable
 private fun GridViz(state: VizState, modifier: Modifier, rows: Int = 9) {
+    val faintDots = remember { ArrayList<Offset>() }
+    val whiteDots = remember { ArrayList<Offset>() }
+    val redDots = remember { ArrayList<Offset>() }
     Canvas(modifier) {
         state.frame
         val cols = state.bands
@@ -159,25 +164,36 @@ private fun GridViz(state: VizState, modifier: Modifier, rows: Int = 9) {
         val rh = size.height / rows
         val r = min(cw, rh) * 0.3f * (1f + 0.22f * state.pulse)
         val flashRows = if (state.pulse > 0.3f) 2 else 0
+        faintDots.clear()
+        whiteDots.clear()
+        redDots.clear()
         for (c in 0 until cols) {
             val lit = (state.levels[c] * rows).roundToInt()
+            val cx = c * cw + cw / 2
             for (row in 0 until rows) {
                 val on = row < lit
-                val color = when {
-                    on && row < flashRows -> Dot.Red
-                    on && row == lit - 1 && lit >= rows - 2 -> Dot.Red
-                    on -> Dot.White
-                    else -> Dot.Faint
+                val p = Offset(cx, size.height - (row * rh + rh / 2))
+                when {
+                    on && row < flashRows -> redDots.add(p)
+                    on && row == lit - 1 && lit >= rows - 2 -> redDots.add(p)
+                    on -> whiteDots.add(p)
+                    else -> faintDots.add(p)
                 }
-                drawCircle(color, r, Offset(c * cw + cw / 2, size.height - (row * rh + rh / 2)))
             }
         }
+        val diameter = r * 2f
+        if (faintDots.isNotEmpty()) drawPoints(faintDots, PointMode.Points, Dot.Faint, diameter, StrokeCap.Round)
+        if (whiteDots.isNotEmpty()) drawPoints(whiteDots, PointMode.Points, Dot.White, diameter, StrokeCap.Round)
+        if (redDots.isNotEmpty()) drawPoints(redDots, PointMode.Points, Dot.Red, diameter, StrokeCap.Round)
     }
 }
 
 /** Bars mirrored above and below a centre line, which flashes red on beats. */
 @Composable
 private fun MirrorViz(state: VizState, modifier: Modifier, rows: Int = 11) {
+    val faintDots = remember { ArrayList<Offset>() }
+    val whiteDots = remember { ArrayList<Offset>() }
+    val redDots = remember { ArrayList<Offset>() }
     Canvas(modifier) {
         state.frame
         // Bass in the middle, highs towards both edges.
@@ -186,27 +202,39 @@ private fun MirrorViz(state: VizState, modifier: Modifier, rows: Int = 11) {
         val rh = size.height / rows
         val mid = rows / 2
         val r = min(cw, rh) * 0.3f * (1f + 0.15f * state.pulse)
+        faintDots.clear()
+        whiteDots.clear()
+        redDots.clear()
         for (c in 0 until cols) {
             val band = abs(c - (cols / 2))
             val reach = (state.levels[band] * (mid + 0.5f)).roundToInt()
+            val cx = c * cw + cw / 2
             for (row in 0 until rows) {
                 val d = abs(row - mid)
                 val on = d <= reach && (reach > 0 || d == 0)
-                val color = when {
-                    d == 0 && state.pulse > 0.3f -> Dot.Red
-                    on && d == reach && reach >= mid - 1 -> Dot.Red
-                    on -> Dot.White
-                    else -> Dot.Faint
+                val p = Offset(cx, row * rh + rh / 2)
+                when {
+                    d == 0 && state.pulse > 0.3f -> redDots.add(p)
+                    on && d == reach && reach >= mid - 1 -> redDots.add(p)
+                    on -> whiteDots.add(p)
+                    else -> faintDots.add(p)
                 }
-                drawCircle(color, r, Offset(c * cw + cw / 2, row * rh + rh / 2))
             }
         }
+        val diameter = r * 2f
+        if (faintDots.isNotEmpty()) drawPoints(faintDots, PointMode.Points, Dot.Faint, diameter, StrokeCap.Round)
+        if (whiteDots.isNotEmpty()) drawPoints(whiteDots, PointMode.Points, Dot.White, diameter, StrokeCap.Round)
+        if (redDots.isNotEmpty()) drawPoints(redDots, PointMode.Points, Dot.Red, diameter, StrokeCap.Round)
     }
 }
 
 /** Dot-matrix oscilloscope of the actual waveform. */
 @Composable
 private fun WaveViz(state: VizState, modifier: Modifier, rows: Int = 11) {
+    val faintDots = remember { ArrayList<Offset>() }
+    val mutedDots = remember { ArrayList<Offset>() }
+    val whiteDots = remember { ArrayList<Offset>() }
+    val redDots = remember { ArrayList<Offset>() }
     Canvas(modifier) {
         state.frame
         val cols = state.wave.size
@@ -214,19 +242,29 @@ private fun WaveViz(state: VizState, modifier: Modifier, rows: Int = 11) {
         val rh = size.height / rows
         val mid = rows / 2
         val r = min(cw, rh) * 0.34f
+        faintDots.clear()
+        mutedDots.clear()
+        whiteDots.clear()
+        redDots.clear()
         for (c in 0 until cols) {
             val target = (mid - state.wave[c] * mid).roundToInt().coerceIn(0, rows - 1)
             val lo = min(mid, target)
             val hi = maxOf(mid, target)
+            val cx = c * cw + cw / 2
             for (row in 0 until rows) {
-                val color = when {
-                    row == target -> if (state.pulse > 0.35f) Dot.Red else Dot.White
-                    row in lo..hi -> Dot.Muted
-                    else -> Dot.Faint
+                val p = Offset(cx, row * rh + rh / 2)
+                when {
+                    row == target -> if (state.pulse > 0.35f) redDots.add(p) else whiteDots.add(p)
+                    row in lo..hi -> mutedDots.add(p)
+                    else -> faintDots.add(p)
                 }
-                drawCircle(color, if (row == target) r * 1.15f else r * 0.8f, Offset(c * cw + cw / 2, row * rh + rh / 2))
             }
         }
+        val diameter = r * 2f
+        if (faintDots.isNotEmpty()) drawPoints(faintDots, PointMode.Points, Dot.Faint, diameter * 0.8f, StrokeCap.Round)
+        if (mutedDots.isNotEmpty()) drawPoints(mutedDots, PointMode.Points, Dot.Muted, diameter * 0.8f, StrokeCap.Round)
+        if (whiteDots.isNotEmpty()) drawPoints(whiteDots, PointMode.Points, Dot.White, diameter * 1.15f, StrokeCap.Round)
+        if (redDots.isNotEmpty()) drawPoints(redDots, PointMode.Points, Dot.Red, diameter * 1.15f, StrokeCap.Round)
     }
 }
 
@@ -400,6 +438,10 @@ private fun androidx.compose.ui.graphics.Color.toArgbInt(): Int = android.graphi
  */
 @Composable
 fun HaloViz(song: Song, state: VizState, modifier: Modifier = Modifier) {
+    val faintDots = remember { ArrayList<Offset>() }
+    val whiteDots = remember { ArrayList<Offset>() }
+    val redDots = remember { ArrayList<Offset>() }
+    val rippleDots = remember { ArrayList<Offset>() }
     Box(modifier, contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
             state.frame
@@ -412,6 +454,9 @@ fun HaloViz(song: Song, state: VizState, modifier: Modifier = Modifier) {
             val gap = (maxR - inner) / (dotsPerSpoke + 0.5f)
             val r = gap * 0.28f
 
+            faintDots.clear()
+            whiteDots.clear()
+            redDots.clear()
             for (s in 0 until spokes) {
                 val angle = (s.toFloat() / spokes) * 2f * PI.toFloat() - PI.toFloat() / 2
                 val half = if (s <= spokes / 2) s else spokes - s
@@ -422,14 +467,18 @@ fun HaloViz(song: Song, state: VizState, modifier: Modifier = Modifier) {
                 for (d in 0 until dotsPerSpoke) {
                     val dist = inner + gap * (d + 0.8f)
                     val on = d < lit
-                    val color = when {
-                        on && d == lit - 1 && lit >= dotsPerSpoke - 1 -> Dot.Red
-                        on -> Dot.White
-                        else -> Dot.Faint
+                    val p = Offset(cx + ca * dist, cy + sa * dist)
+                    when {
+                        on && d == lit - 1 && lit >= dotsPerSpoke - 1 -> redDots.add(p)
+                        on -> whiteDots.add(p)
+                        else -> faintDots.add(p)
                     }
-                    drawCircle(color, r, Offset(cx + ca * dist, cy + sa * dist))
                 }
             }
+            val diameter = r * 2f
+            if (faintDots.isNotEmpty()) drawPoints(faintDots, PointMode.Points, Dot.Faint, diameter, StrokeCap.Round)
+            if (whiteDots.isNotEmpty()) drawPoints(whiteDots, PointMode.Points, Dot.White, diameter, StrokeCap.Round)
+            if (redDots.isNotEmpty()) drawPoints(redDots, PointMode.Points, Dot.Red, diameter, StrokeCap.Round)
 
             val now = state.frame
             for ((start, strength) in state.ripples) {
@@ -437,10 +486,12 @@ fun HaloViz(song: Song, state: VizState, modifier: Modifier = Modifier) {
                 val radius = inner + (maxR - inner) * t
                 val alpha = (1f - t) * strength
                 val dots = 48
+                rippleDots.clear()
                 for (k in 0 until dots) {
                     val a = k * 2f * PI.toFloat() / dots
-                    drawCircle(Dot.Red.copy(alpha = alpha), r * 1.1f, Offset(cx + cos(a) * radius, cy + sin(a) * radius))
+                    rippleDots.add(Offset(cx + cos(a) * radius, cy + sin(a) * radius))
                 }
+                drawPoints(rippleDots, PointMode.Points, Dot.Red.copy(alpha = alpha), r * 2.2f, StrokeCap.Round)
             }
         }
         Art(
