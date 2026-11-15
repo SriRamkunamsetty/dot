@@ -195,7 +195,7 @@ class DotEngine(
     init {
         audioManager.registerAudioDeviceCallback(headphoneCallback, Handler(Looper.getMainLooper()))
         ContextCompat.registerReceiver(
-            app, noisyReceiver, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), ContextCompat.RECEIVER_EXPORTED,
+            app, noisyReceiver, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), ContextCompat.RECEIVER_NOT_EXPORTED,
         )
         players.forEach { it.playbackParameters = playbackParams() }
         applyVolumes()
