@@ -97,10 +97,6 @@ class Settings(context: Context) {
     fun lyricsFolderUris(): List<android.net.Uri> =
         lyricsFolders.value.lines().filter { it.isNotBlank() }.map(android.net.Uri::parse)
 
-    /** Per-song lyrics timing shift in ms; positive shows lines later. */
-    fun lyricsOffset(songId: Long): Int = deviceSp.getInt("lrc_off_$songId", 0)
-    fun setLyricsOffset(songId: Long, ms: Int) = deviceSp.edit().putInt("lrc_off_$songId", ms).apply()
-
     /** Bumped when learned tempos from older versions can't be trusted and must be relearned. */
     val tempoVersion = portableInt("tempo_version", 1)
 

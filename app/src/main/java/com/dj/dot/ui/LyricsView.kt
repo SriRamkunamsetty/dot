@@ -106,7 +106,7 @@ fun LyricsView(modifier: Modifier = Modifier) {
 @Composable
 private fun SyncedLyrics(lyrics: Lyrics, songId: Long, songDuration: Long, position: () -> Long, modifier: Modifier) {
     val dot = DotApp.instance
-    var offset by remember(songId) { mutableIntStateOf(dot.settings.lyricsOffset(songId)) }
+    var offset by remember(songId) { mutableIntStateOf(dot.store.lyricsOffset(songId)) }
     val items = remember(lyrics, songDuration) { buildItems(lyrics, songDuration) }
     val shifted = { position() - offset }
     // Recomposes only when the current line changes; found by binary search.
@@ -149,9 +149,9 @@ private fun SyncedLyrics(lyrics: Lyrics, songId: Long, songDuration: Long, posit
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Pill("Earlier", { offset -= 250; dot.settings.setLyricsOffset(songId, offset) })
+            Pill("Earlier", { offset -= 250; dot.store.setLyricsOffset(songId, offset) })
             Label(if (offset == 0) "In sync" else "%+.2fs".format(offset / 1000f), color = if (offset == 0) Dot.Muted else Dot.White)
-            Pill("Later", { offset += 250; dot.settings.setLyricsOffset(songId, offset) })
+            Pill("Later", { offset += 250; dot.store.setLyricsOffset(songId, offset) })
             AnimatedVisibility(!autoScroll, enter = fadeIn(), exit = fadeOut()) {
                 Pill("Sync", { autoScroll = true }, accent = true)
             }

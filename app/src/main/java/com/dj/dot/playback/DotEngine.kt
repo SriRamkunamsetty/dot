@@ -48,6 +48,11 @@ import com.dj.dot.data.LibraryData
 import com.dj.dot.data.PlaylistStore
 import com.dj.dot.data.Settings
 import com.dj.dot.data.Song
+import androidx.core.util.AtomicFile
+import java.io.ByteArrayInputStream
+import java.io.DataInputStream
+import java.io.DataOutputStream
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
@@ -157,6 +162,8 @@ class DotEngine(
     /** Mirrors the active player's playlist; edited in place so queue changes stay O(change). */
     private var items: MutableList<MediaItem> = ArrayList()
     private var originalQueue: List<Song>? = null
+    private val queueFile = AtomicFile(File(app.filesDir, "queue.bin"))
+    private var lastSavedQueueIds: List<Long>? = null
 
     // Final volume of each player = gain[i] * master * duck.
     private val gain = floatArrayOf(1f, 0f)
@@ -864,19 +871,61 @@ class DotEngine(
         return List(fx.bandCount) { parsed.getOrElse(it) { 0 } }
     }
 
+    fun hasSavedQueue(): Boolean = queueFile.baseFile.exists() || settings.queueIds.value.isNotEmpty()
+
+    private fun writeQueueFile(ids: List<Long>) {
+        runCatching {
+            val out = queueFile.startWrite()
+            try {
+                val dos = DataOutputStream(out)
+                dos.writeInt(ids.size)
+                for (id in ids) dos.writeLong(id)
+                dos.flush()
+                queueFile.finishWrite(out)
+            } catch (e: Throwable) {
+                queueFile.failWrite(out)
+                throw e
+            }
+        }
+    }
+
+    private fun readQueueFile(): List<Long>? = runCatching {
+        if (!queueFile.baseFile.exists()) return@runCatching null
+        val bytes = queueFile.readFully()
+        val dis = DataInputStream(ByteArrayInputStream(bytes))
+        val size = dis.readInt()
+        val list = ArrayList<Long>(size)
+        for (i in 0 until size) list.add(dis.readLong())
+        list
+    }.getOrNull()
+
+    private fun saveQueueIfChanged(songs: List<Song>) {
+        val ids = songs.map { it.id }
+        if (ids == lastSavedQueueIds) return
+        lastSavedQueueIds = ids
+        scope.launch(Dispatchers.IO) {
+            writeQueueFile(ids)
+        }
+    }
+
     fun save() {
         val st = _state.value
-        settings.queueIds.set(st.queue.joinToString(",") { it.id.toString() })
         settings.queueIndex.set(st.index.coerceAtLeast(0))
         settings.queuePos.set(active.currentPosition)
         settings.shuffle.set(st.shuffle)
         settings.repeat.set(st.repeat)
+        saveQueueIfChanged(st.queue)
     }
 
     private fun restore(lib: LibraryData) {
         if (items.isNotEmpty()) return
-        val songs = settings.queueIds.value.split(',').mapNotNull { it.toLongOrNull()?.let(lib.byId::get) }
+        val savedIds = readQueueFile() ?: settings.queueIds.value.split(',').mapNotNull { it.toLongOrNull() }
+        val songs = savedIds.mapNotNull(lib.byId::get)
         if (songs.isEmpty()) return
+        lastSavedQueueIds = savedIds
+        if (settings.queueIds.value.isNotEmpty()) {
+            settings.queueIds.set("")
+        }
         val index = settings.queueIndex.value.coerceIn(0, songs.lastIndex)
         setQueue(songs)
         _state.value = _state.value.copy(shuffle = settings.shuffle.value, repeat = settings.repeat.value)

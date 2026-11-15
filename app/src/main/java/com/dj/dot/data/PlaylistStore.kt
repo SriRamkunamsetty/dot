@@ -43,6 +43,10 @@ class PlaylistStore(private val dir: File, private val scope: CoroutineScope) {
     /** Tempo learned the first time each song plays, for the mood mixes. */
     private val _bpm = MutableStateFlow<Map<Long, Int>>(emptyMap())
     val bpm: StateFlow<Map<Long, Int>> = _bpm
+
+    /** Per-song lyrics timing offset in ms, positive shows lines later. */
+    private val _lyricsOffsets = MutableStateFlow<Map<Long, Int>>(emptyMap())
+    val lyricsOffsets: StateFlow<Map<Long, Int>> = _lyricsOffsets
     var trackingSince: Long = System.currentTimeMillis()
         private set
 
@@ -95,6 +99,35 @@ class PlaylistStore(private val dir: File, private val scope: CoroutineScope) {
             val tempo = root.optJSONObject("bpm") ?: JSONObject()
             _bpm.value = tempo.keys().asSequence().associate { it.toLong() to tempo.getInt(it) }
         }
+        runCatching {
+            val lrc = root.optJSONObject("lyrics_offsets") ?: JSONObject()
+            _lyricsOffsets.value = lrc.keys().asSequence().associate { it.toLong() to lrc.getInt(it) }
+        }
+    }
+
+    fun lyricsOffset(songId: Long): Int = _lyricsOffsets.value[songId] ?: 0
+
+    fun setLyricsOffset(songId: Long, ms: Int) {
+        _lyricsOffsets.value = _lyricsOffsets.value + (songId to ms)
+        save()
+    }
+
+    fun migrateLyricsOffsets(sp: android.content.SharedPreferences) {
+        val lrcKeys = sp.all.keys.filter { it.startsWith("lrc_off_") }
+        if (lrcKeys.isEmpty()) return
+        val map = _lyricsOffsets.value.toMutableMap()
+        val editor = sp.edit()
+        for (k in lrcKeys) {
+            val songId = k.removePrefix("lrc_off_").toLongOrNull()
+            val offset = (sp.all[k] as? Number)?.toInt() ?: 0
+            if (songId != null && songId !in map) {
+                map[songId] = offset
+            }
+            editor.remove(k)
+        }
+        editor.apply()
+        _lyricsOffsets.value = map
+        save()
     }
 
     fun create(name: String, songIds: List<Long> = emptyList()): String {
@@ -301,6 +334,7 @@ class PlaylistStore(private val dir: File, private val scope: CoroutineScope) {
         .put("hours", JSONArray(_hourMs.value))
         .put("since", trackingSince)
         .put("bpm", JSONObject().apply { _bpm.value.forEach { (k, v) -> put(k.toString(), v) } })
+        .put("lyrics_offsets", JSONObject().apply { _lyricsOffsets.value.forEach { (k, v) -> put(k.toString(), v) } })
         .toString()
 }
 

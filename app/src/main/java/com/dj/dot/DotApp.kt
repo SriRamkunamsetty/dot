@@ -1,6 +1,7 @@
 package com.dj.dot
 
 import android.app.Application
+import android.content.Context
 import com.dj.dot.data.Library
 import com.dj.dot.data.PlaylistStore
 import com.dj.dot.data.Settings
@@ -31,6 +32,7 @@ class DotApp : Application() {
         val scope = MainScope()
         settings = Settings(this)
         store = PlaylistStore(filesDir, scope)
+        store.migrateLyricsOffsets(getSharedPreferences("dot", Context.MODE_PRIVATE))
         // Tempos learned before 1.1.1 could be skewed by crossfades and playback speed; relearn them.
         if (settings.tempoVersion.value < 2) {
             store.clearBpm()

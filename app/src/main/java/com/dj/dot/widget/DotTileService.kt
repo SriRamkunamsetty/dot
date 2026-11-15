@@ -19,7 +19,7 @@ class DotTileService : TileService() {
 
     override fun onClick() {
         val engine = DotApp.instance.engine
-        if (engine.state.value.queue.isEmpty() && DotApp.instance.settings.queueIds.value.isEmpty()) {
+        if (engine.state.value.queue.isEmpty() && !engine.hasSavedQueue()) {
             openApp()
             return
         }

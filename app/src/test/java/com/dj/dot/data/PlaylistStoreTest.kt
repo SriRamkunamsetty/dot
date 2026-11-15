@@ -152,4 +152,16 @@ class PlaylistStoreTest {
         assertEquals(200, parsed.playlists.single().name.length)
         assertFalse(parsed.playlists.single().name.isBlank())
     }
+
+    @Test fun savesAndLoadsLyricsOffsets() {
+        val store = PlaylistStore(dir, scope)
+        store.setLyricsOffset(101L, 750)
+        store.setLyricsOffset(102L, -500)
+        awaitFile("library.json", "lyrics_offsets")
+
+        val again = PlaylistStore(dir, scope)
+        assertEquals(750, again.lyricsOffset(101L))
+        assertEquals(-500, again.lyricsOffset(102L))
+        assertEquals(0, again.lyricsOffset(999L))
+    }
 }
