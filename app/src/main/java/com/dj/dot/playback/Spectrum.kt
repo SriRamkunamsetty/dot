@@ -6,6 +6,8 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.audio.TeeAudioProcessor
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicIntegerArray
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.ln
@@ -83,15 +85,15 @@ class Spectrum(
     // Analysed frames run ahead of the speaker by the AudioTrack buffer, so keep a short
     // history and let the UI read the frame matching what is audible right now.
     private val histSize = 48
-    private val histT = LongArray(histSize)
-    private val histV = arrayOfNulls<FloatArray>(histSize)
-    private val histBeat = FloatArray(histSize)
-    private val histWave = arrayOfNulls<FloatArray>(histSize)
-    private var waveAmp = 1e-3f
-
     /** Points per waveform snapshot. */
     val wavePoints = 64
-    private var head = 0
+    private val histT = LongArray(histSize)
+    private val histV = Array(histSize) { FloatArray(bands) }
+    private val histBeat = FloatArray(histSize)
+    private val histWave = Array(histSize) { FloatArray(wavePoints) }
+    private val histSeq = AtomicIntegerArray(histSize)
+    private var waveAmp = 1e-3f
+    private val head = AtomicInteger(0)
 
     /**
      * Which player's audio is analysed. Each player gets its own [input]; the other one is ignored,
@@ -99,6 +101,7 @@ class Spectrum(
      */
     @Volatile var activeInput = 0
     private var source = -1
+    private val audioLock = Any()
 
     /** The tap for player [id]; it remembers its own format, since both players run on their own threads. */
     fun input(id: Int): TeeAudioProcessor.AudioBufferSink = object : TeeAudioProcessor.AudioBufferSink {
@@ -110,25 +113,31 @@ class Spectrum(
             rate = sampleRateHz
             chans = channelCount.coerceAtLeast(1)
             enc = encoding
-            if (id == activeInput) synchronized(this@Spectrum) { configure(id, rate, chans, enc) }
+            if (id == activeInput) synchronized(audioLock) { configure(id, rate, chans, enc) }
         }
 
         override fun handleBuffer(buffer: ByteBuffer) {
             if (id != activeInput) return
-            synchronized(this@Spectrum) {
+            synchronized(audioLock) {
+                if (id != activeInput) return
                 if (source != id || sampleRate != rate || channels != chans || encoding != enc) configure(id, rate, chans, enc)
-                this@Spectrum.handleBuffer(buffer)
+                processBuffer(buffer)
             }
         }
     }
 
     private fun configure(id: Int, sampleRateHz: Int, channelCount: Int, encoding: Int) {
         source = id
-        flush(sampleRateHz, channelCount, encoding)
+        flushInternal(sampleRateHz, channelCount, encoding)
     }
 
-    @Synchronized
     override fun flush(sampleRateHz: Int, channelCount: Int, encoding: Int) {
+        synchronized(audioLock) {
+            flushInternal(sampleRateHz, channelCount, encoding)
+        }
+    }
+
+    private fun flushInternal(sampleRateHz: Int, channelCount: Int, encoding: Int) {
         sampleRate = sampleRateHz
         channels = channelCount.coerceAtLeast(1)
         this.encoding = encoding
@@ -143,11 +152,22 @@ class Spectrum(
         fluxSumSq = 0f
         beatCount = 0
         bpm = 0
+        for (i in 0 until histSize) {
+            histSeq.set(i, 0)
+            histT[i] = 0L
+            histBeat[i] = 0f
+        }
+        head.set(0)
     }
 
-    @Synchronized
     override fun handleBuffer(buffer: ByteBuffer) {
         if (!enabled) return
+        synchronized(audioLock) {
+            processBuffer(buffer)
+        }
+    }
+
+    private fun processBuffer(buffer: ByteBuffer) {
         val b = buffer.duplicate().order(ByteOrder.nativeOrder())
         when (encoding) {
             C.ENCODING_PCM_16BIT -> repeat(b.remaining() / (2 * channels)) {
@@ -178,19 +198,48 @@ class Spectrum(
     }
 
     /** Levels (0..1) closest to [nanoTime], or null if nothing recent. */
-    @Synchronized
-    fun levelsAt(nanoTime: Long): FloatArray? = frameAt(nanoTime)?.let { histV[it] }
+    fun levelsAt(nanoTime: Long): FloatArray? = levelsAt(nanoTime, null)
+
+    /** Levels (0..1) closest to [nanoTime], copied into [out] if supplied (must have size [bands]). */
+    fun levelsAt(nanoTime: Long, out: FloatArray?): FloatArray? {
+        for (attempt in 0 until 3) {
+            val i = frameAt(nanoTime) ?: return null
+            val s1 = histSeq.get(i)
+            if (s1 == 0 || (s1 and 1) != 0) continue
+            val target = if (out != null && out.size == bands) out else FloatArray(bands)
+            System.arraycopy(histV[i], 0, target, 0, bands)
+            val s2 = histSeq.get(i)
+            if (s1 == s2) return target
+        }
+        return null
+    }
 
     /** Waveform (-1..1) closest to [nanoTime], or null if nothing recent. */
-    @Synchronized
-    fun waveAt(nanoTime: Long): FloatArray? = frameAt(nanoTime)?.let { histWave[it] }
+    fun waveAt(nanoTime: Long): FloatArray? = waveAt(nanoTime, null)
+
+    /** Waveform (-1..1) closest to [nanoTime], copied into [out] if supplied (must have size [wavePoints]). */
+    fun waveAt(nanoTime: Long, out: FloatArray?): FloatArray? {
+        for (attempt in 0 until 3) {
+            val i = frameAt(nanoTime) ?: return null
+            val s1 = histSeq.get(i)
+            if (s1 == 0 || (s1 and 1) != 0) continue
+            val target = if (out != null && out.size == wavePoints) out else FloatArray(wavePoints)
+            System.arraycopy(histWave[i], 0, target, 0, wavePoints)
+            val s2 = histSeq.get(i)
+            if (s1 == s2) return target
+        }
+        return null
+    }
 
     /** Newest frame at or before [nanoTime]; walks back from the head, usually a few steps. */
     private fun frameAt(nanoTime: Long): Int? {
+        val currentHead = head.get()
         for (k in 1..histSize) {
-            val i = (head - k + histSize) % histSize
-            if (histV[i] == null) return null
+            val i = (currentHead - k + histSize) % histSize
+            val seq = histSeq.get(i)
+            if (seq == 0 || (seq and 1) != 0) continue
             val t = histT[i]
+            if (t == 0L) continue
             if (t <= nanoTime) return if (nanoTime - t < 400_000_000L) i else null
         }
         return null
@@ -200,22 +249,25 @@ class Spectrum(
     fun lastBeatNanos(): Long = lastBeatNs
 
     /** Starts a fresh tempo estimate, used when a new song begins. */
-    @Synchronized
     fun resetTempo() {
-        beatCount = 0
-        beatHead = 0
-        lastBeatNs = 0L
-        bpm = 0
+        synchronized(audioLock) {
+            beatCount = 0
+            beatHead = 0
+            lastBeatNs = 0L
+            bpm = 0
+        }
     }
 
     /** Strongest beat (0..1) analysed in (fromNs, toNs], 0 if none. Walks back only as far as [fromNs]. */
-    @Synchronized
     fun beatBetween(fromNs: Long, toNs: Long): Float {
         var strength = 0f
+        val currentHead = head.get()
         for (k in 1..histSize) {
-            val i = (head - k + histSize) % histSize
+            val i = (currentHead - k + histSize) % histSize
+            val seq = histSeq.get(i)
+            if (seq == 0 || (seq and 1) != 0) continue
             val t = histT[i]
-            if (histV[i] == null || t <= fromNs) break
+            if (t == 0L || t <= fromNs) break
             if (t <= toNs) strength = max(strength, histBeat[i])
         }
         return strength
@@ -246,8 +298,11 @@ class Spectrum(
             mags[b] = m
         }
         peak = max(mags.max(), max(peak * 0.995f, 1e-3f))
-        // History slots are reused rather than reallocated 43 times a second.
-        val levels = histV[head]?.takeIf { it.size == bands } ?: FloatArray(bands)
+        val h = head.get()
+        val s = histSeq.get(h)
+        histSeq.set(h, s + 1)
+
+        val levels = histV[h]
         for (b in 0 until bands) levels[b] = (log10(1f + 9f * mags[b] / peak)).coerceIn(0f, 1f)
 
         // Spectral flux, kick range counted fully and the rest at a third.
@@ -286,7 +341,7 @@ class Spectrum(
 
         // Waveform: average each 1/64th of the frame, normalised with a slow auto-gain.
         val step = n / wavePoints
-        val wave = histWave[head] ?: FloatArray(wavePoints)
+        val wave = histWave[h]
         var frameAmp = 0f
         if (waveUsers.get() > 0) for (p in 0 until wavePoints) {
             var acc = 0f
@@ -297,11 +352,12 @@ class Spectrum(
         waveAmp = max(frameAmp, max(waveAmp * 0.99f, 1e-3f))
         if (waveUsers.get() > 0) for (p in 0 until wavePoints) wave[p] = (wave[p] / waveAmp).coerceIn(-1f, 1f)
 
-        histT[head] = now
-        histV[head] = levels
-        histBeat[head] = beat
-        histWave[head] = wave
-        head = (head + 1) % histSize
+        histBeat[h] = beat
+        histT[h] = now
+
+        val next = s + 2
+        histSeq.set(h, if (next == 0) 2 else next)
+        head.set((h + 1) % histSize)
     }
 
     private fun registerBeat(now: Long) {

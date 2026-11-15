@@ -109,4 +109,80 @@ class SpectrumTest {
             assertTrue("low bands light at $testRate Hz", levels.take(4).max() > levels.takeLast(4).max() + 0.3f)
         }
     }
+
+    @Test fun `returns independent copy of levels and waveform array`() {
+        val s = Spectrum(clock = { now }).apply {
+            acquire(needsWave = true)
+            flush(rate, 2, C.ENCODING_PCM_16BIT)
+        }
+        feed(s, 1.0) { t -> 0.5 * sin(2 * PI * 100 * t) }
+        val levels1 = s.levelsAt(now)!!
+        val originalVal = levels1[0]
+        levels1[0] = 999f
+        val levels2 = s.levelsAt(now)!!
+        assertTrue("Modifying returned array must not mutate internal buffer", levels2[0] == originalVal)
+
+        val wave1 = s.waveAt(now)!!
+        val originalWaveVal = wave1[0]
+        wave1[0] = 999f
+        val wave2 = s.waveAt(now)!!
+        assertTrue("Modifying returned wave must not mutate internal buffer", wave2[0] == originalWaveVal)
+    }
+
+    @Test fun `supports caller provided destination buffer`() {
+        val s = Spectrum(clock = { now }).apply {
+            acquire(needsWave = true)
+            flush(rate, 2, C.ENCODING_PCM_16BIT)
+        }
+        feed(s, 1.0) { t -> 0.5 * sin(2 * PI * 100 * t) }
+        val dest = FloatArray(s.bands)
+        val result = s.levelsAt(now, dest)
+        assertTrue(result === dest)
+        assertTrue(dest.any { it > 0f })
+
+        val waveDest = FloatArray(s.wavePoints)
+        val waveResult = s.waveAt(now, waveDest)
+        assertTrue(waveResult === waveDest)
+    }
+
+    @Test fun `concurrent reads and writes do not deadlock`() {
+        val s = Spectrum(clock = { System.nanoTime() }).apply {
+            acquire(needsWave = true)
+            flush(rate, 2, C.ENCODING_PCM_16BIT)
+        }
+        val stop = java.util.concurrent.atomic.AtomicBoolean(false)
+        val errors = java.util.concurrent.CopyOnWriteArrayList<Throwable>()
+
+        val readers = (0 until 4).map {
+            Thread {
+                val out = FloatArray(s.bands)
+                while (!stop.get()) {
+                    try {
+                        val t = System.nanoTime()
+                        s.levelsAt(t, out)
+                        s.waveAt(t)
+                        s.beatBetween(t - 100_000_000L, t)
+                    } catch (e: Throwable) {
+                        errors.add(e)
+                    }
+                }
+            }
+        }
+        readers.forEach { it.start() }
+
+        val chunk = 1024
+        val buf = ByteBuffer.allocateDirect(chunk * 4).order(ByteOrder.nativeOrder())
+        for (i in 0 until chunk) {
+            buf.putShort(1000.toShort()); buf.putShort(1000.toShort())
+        }
+        repeat(50) {
+            buf.rewind()
+            s.handleBuffer(buf)
+        }
+
+        stop.set(true)
+        readers.forEach { it.join(1000) }
+        assertTrue("No exceptions during concurrent reads/writes", errors.isEmpty())
+    }
+    }
 }
