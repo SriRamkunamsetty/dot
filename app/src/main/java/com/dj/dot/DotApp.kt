@@ -37,6 +37,13 @@ class DotApp : Application() {
             settings.tempoVersion.set(2)
         }
         library = Library(this, scope, settings, onScanComplete = { ArtLoader.clearMissing() })
+        scope.launch {
+            library.data.collect { lib ->
+                if (lib.songs.isNotEmpty()) {
+                    store.pruneOrphanStats(lib.byId.keys)
+                }
+            }
+        }
         engine = DotEngine(this, settings, store, library)
         val playing = engine.state.map { it.playing }.distinctUntilChanged().stateIn(scope, SharingStarted.Eagerly, false)
         glyph = GlyphLights(this, engine.spectrum, settings, playing) { engine.progress }

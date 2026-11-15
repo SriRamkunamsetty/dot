@@ -53,12 +53,12 @@ class PlaylistStoreTest {
     }
 
     @Test fun savesAndLoadsPlaylists() {
-        val store = PlaylistStore(dir, scope)
+        val store = PlaylistStore(dir, scope, async = false)
         store.create("Road trip", listOf(3, 4))
         store.toggleFavourite(4)
         awaitFile("library.json", "Road trip")
 
-        val again = PlaylistStore(dir, scope)
+        val again = PlaylistStore(dir, scope, async = false)
         assertEquals("Road trip", again.playlists.value.single().name)
         assertEquals(listOf(3L, 4L), again.playlists.value.single().songIds)
         assertEquals(setOf(4L), again.favourites.value)
@@ -67,18 +67,18 @@ class PlaylistStoreTest {
     @Test fun damagedFileFallsBackToPreviousSession() {
         File(dir, "library.json").writeText(libraryJson("Good"))
         // First session: the first save keeps the good file as the previous copy.
-        PlaylistStore(dir, scope).toggleFavourite(9)
+        PlaylistStore(dir, scope, async = false).toggleFavourite(9)
         awaitFile("library.json.prev", "Good")
 
         File(dir, "library.json").writeText("{\"playlists\": [ truncated")
-        val store = PlaylistStore(dir, scope)
+        val store = PlaylistStore(dir, scope, async = false)
         assertEquals("Good", store.playlists.value.single().name)
     }
 
     @Test fun unreadableFileIsKeptAsideNotLost() {
         val broken = "{\"playlists\": [ truncated"
         File(dir, "library.json").writeText(broken)
-        val store = PlaylistStore(dir, scope)
+        val store = PlaylistStore(dir, scope, async = false)
         assertTrue(store.playlists.value.isEmpty())
         assertEquals(broken, File(dir, "library.json.corrupt").readText())
     }
@@ -86,13 +86,13 @@ class PlaylistStoreTest {
     @Test fun oneBadSectionDoesNotDropTheRest() {
         val json = JSONObject(libraryJson("Kept")).put("counts", JSONObject().put("1", "lots")).toString()
         File(dir, "library.json").writeText(json)
-        val store = PlaylistStore(dir, scope)
+        val store = PlaylistStore(dir, scope, async = false)
         assertEquals("Kept", store.playlists.value.single().name)
         assertEquals(setOf(2L), store.favourites.value)
     }
 
     @Test fun removeAtIgnoresAStaleIndex() {
-        val store = PlaylistStore(dir, scope)
+        val store = PlaylistStore(dir, scope, async = false)
         val id = store.create("Mix", listOf(1, 2, 3))
         store.removeAt(id, 1, songId = 3)
         assertEquals(listOf(1L, 2L, 3L), store.playlists.value.single().songIds)
@@ -111,7 +111,7 @@ class PlaylistStoreTest {
 
     @Test fun restoreReplacesEverythingFromAValidBackup() {
         val lib = library(song(1), song(2))
-        val store = PlaylistStore(dir, scope)
+        val store = PlaylistStore(dir, scope, async = false)
         store.create("Old")
         val parsed = PlaylistStore.parseBackup(backup(), lib)
         store.restore(parsed)
@@ -151,5 +151,54 @@ class PlaylistStoreTest {
         val parsed = PlaylistStore.parseBackup(json, library(song(1)))
         assertEquals(200, parsed.playlists.single().name.length)
         assertFalse(parsed.playlists.single().name.isBlank())
+    }
+
+    @Test fun loadsAsynchronouslyWithoutBlockingCaller() {
+        File(dir, "library.json").writeText(libraryJson("Async Mix"))
+        val store = PlaylistStore(dir, scope, async = true)
+        store.awaitLoadedSync()
+        assertTrue(store.loaded.value)
+        assertEquals("Async Mix", store.playlists.value.single().name)
+    }
+
+    @Test fun pruneDailyStatsRollsOlderThan13MonthsIntoMonthlyTotals() {
+        val store = PlaylistStore(dir, scope, async = false)
+        // Add daily entries older than 13 months (~400 days) and a recent one
+        val cal = java.util.Calendar.getInstance()
+        cal.add(java.util.Calendar.MONTH, -14)
+        val oldDay1 = "%04d-%02d-%02d".format(cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH) + 1, 10)
+        val oldDay2 = "%04d-%02d-%02d".format(cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH) + 1, 20)
+        val oldMonth = oldDay1.substring(0, 7)
+
+        val recentDay = "2026-11-01"
+
+        val json = JSONObject()
+            .put("daily", JSONObject().put(oldDay1, 30_000L).put(oldDay2, 45_000L).put(recentDay, 10_000L))
+            .toString()
+        File(dir, "library.json").writeText(json)
+
+        val reloaded = PlaylistStore(dir, scope, async = false)
+        val daily = reloaded.dailyMs.value
+        assertEquals(75_000L, daily[oldMonth])
+        assertEquals(10_000L, daily[recentDay])
+        assertFalse(daily.containsKey(oldDay1))
+        assertFalse(daily.containsKey(oldDay2))
+    }
+
+    @Test fun pruneOrphanStatsDropsNonExistentSongIds() {
+        val json = JSONObject()
+            .put("counts", JSONObject().put("1", 10).put("999", 5))
+            .put("listen", JSONObject().put("1", 50000L).put("999", 25000L))
+            .put("bpm", JSONObject().put("1", 120).put("999", 140))
+            .toString()
+        File(dir, "library.json").writeText(json)
+
+        val store = PlaylistStore(dir, scope, async = false)
+        assertEquals(2, store.playCounts.value.size)
+        // Valid songs only include ID 1
+        store.pruneOrphanStats(setOf(1L))
+        assertEquals(mapOf(1L to 10), store.playCounts.value)
+        assertEquals(mapOf(1L to 50000L), store.listenMs.value)
+        assertEquals(mapOf(1L to 120), store.bpm.value)
     }
 }

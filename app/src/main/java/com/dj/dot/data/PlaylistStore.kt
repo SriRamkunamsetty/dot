@@ -9,15 +9,21 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.util.Calendar
 import java.util.UUID
 
 /** Playlists, favourites and play counts, stored as one small JSON file. */
-class PlaylistStore(private val dir: File, private val scope: CoroutineScope) {
+class PlaylistStore(
+    private val dir: File,
+    private val scope: CoroutineScope,
+    async: Boolean = true,
+) {
     private val file = AtomicFile(File(dir, "library.json"))
     /** The file as it was when this session started, kept in case the main one gets damaged. */
     private val previous = AtomicFile(File(dir, "library.json.prev"))
@@ -25,6 +31,9 @@ class PlaylistStore(private val dir: File, private val scope: CoroutineScope) {
     /** One writer at a time, so a slow write can never overlap the next one. */
     @OptIn(ExperimentalCoroutinesApi::class)
     private val io = Dispatchers.IO.limitedParallelism(1)
+
+    private val _loaded = MutableStateFlow(false)
+    val loaded: StateFlow<Boolean> = _loaded
 
     private val _playlists = MutableStateFlow<List<Playlist>>(emptyList())
     val playlists: StateFlow<List<Playlist>> = _playlists
@@ -49,6 +58,16 @@ class PlaylistStore(private val dir: File, private val scope: CoroutineScope) {
     private var saveJob: Job? = null
 
     init {
+        if (async) {
+            scope.launch(io) {
+                initLoad()
+            }
+        } else {
+            initLoad()
+        }
+    }
+
+    private fun initLoad() {
         // Fall back to the copy kept from the previous session if the main file is unreadable.
         val loaded = read(file) ?: read(previous)
         if (loaded == null && file.baseFile.exists()) {
@@ -56,6 +75,20 @@ class PlaylistStore(private val dir: File, private val scope: CoroutineScope) {
             runCatching { file.baseFile.copyTo(File(dir, "library.json.corrupt"), overwrite = true) }
         }
         loaded?.let(::load)
+        pruneDailyStats()
+        _loaded.value = true
+    }
+
+    suspend fun awaitLoaded() {
+        loaded.first { it }
+    }
+
+    fun awaitLoadedSync(timeoutMs: Long = 3000): PlaylistStore {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (!_loaded.value && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10)
+        }
+        return this
     }
 
     private fun read(f: AtomicFile): JSONObject? =
@@ -134,8 +167,16 @@ class PlaylistStore(private val dir: File, private val scope: CoroutineScope) {
 
     /** Forgets every learned tempo so songs are measured again. */
     fun clearBpm() {
-        _bpm.value = emptyMap()
-        save()
+        if (!_loaded.value) {
+            scope.launch(io) {
+                loaded.first { it }
+                _bpm.value = emptyMap()
+                save()
+            }
+        } else {
+            _bpm.value = emptyMap()
+            save()
+        }
     }
 
     fun setBpm(songId: Long, bpm: Int) {
@@ -145,13 +186,69 @@ class PlaylistStore(private val dir: File, private val scope: CoroutineScope) {
 
     fun addListen(songId: Long, ms: Long) {
         if (ms <= 0) return
-        val now = java.util.Calendar.getInstance()
-        val day = "%04d-%02d-%02d".format(now.get(java.util.Calendar.YEAR), now.get(java.util.Calendar.MONTH) + 1, now.get(java.util.Calendar.DAY_OF_MONTH))
-        val hour = now.get(java.util.Calendar.HOUR_OF_DAY)
+        val now = Calendar.getInstance()
+        val day = "%04d-%02d-%02d".format(now.get(Calendar.YEAR), now.get(Calendar.MONTH) + 1, now.get(Calendar.DAY_OF_MONTH))
+        val hour = now.get(Calendar.HOUR_OF_DAY)
         _listenMs.value = _listenMs.value + (songId to (_listenMs.value[songId] ?: 0L) + ms)
         _dailyMs.value = _dailyMs.value + (day to (_dailyMs.value[day] ?: 0L) + ms)
         _hourMs.value = _hourMs.value.toMutableList().also { it[hour] += ms }
         save()
+    }
+
+    /** Rolls daily stats older than ~13 months into monthly totals to keep daily history bounded. */
+    fun pruneDailyStats(nowMs: Long = System.currentTimeMillis()) {
+        val cutoffCal = Calendar.getInstance().apply {
+            timeInMillis = nowMs
+            add(Calendar.MONTH, -13)
+        }
+        val cutoffDay = "%04d-%02d-%02d".format(
+            cutoffCal.get(Calendar.YEAR),
+            cutoffCal.get(Calendar.MONTH) + 1,
+            cutoffCal.get(Calendar.DAY_OF_MONTH)
+        )
+        val current = _dailyMs.value
+        val updated = mutableMapOf<String, Long>()
+        var changed = false
+        for ((key, ms) in current) {
+            if (key.length == 10 && key < cutoffDay) {
+                val monthKey = key.substring(0, 7)
+                updated[monthKey] = (updated[monthKey] ?: 0L) + ms
+                changed = true
+            } else {
+                updated[key] = (updated[key] ?: 0L) + ms
+            }
+        }
+        if (changed) {
+            _dailyMs.value = updated
+            save()
+        }
+    }
+
+    /** Removes playback counts, listen time, and BPM records for songs that no longer exist. */
+    fun pruneOrphanStats(validSongIds: Set<Long>) {
+        if (!_loaded.value || validSongIds.isEmpty()) return
+        var changed = false
+        val counts = _playCounts.value
+        val prunedCounts = counts.filterKeys { it in validSongIds }
+        if (prunedCounts.size != counts.size) {
+            _playCounts.value = prunedCounts
+            changed = true
+        }
+        val listen = _listenMs.value
+        val prunedListen = listen.filterKeys { it in validSongIds }
+        if (prunedListen.size != listen.size) {
+            _listenMs.value = prunedListen
+            changed = true
+        }
+        val bpm = _bpm.value
+        val prunedBpm = bpm.filterKeys { it in validSongIds }
+        if (prunedBpm.size != bpm.size) {
+            _bpm.value = prunedBpm
+            changed = true
+        }
+        if (changed) {
+            save()
+        }
     }
 
     /**
@@ -215,7 +312,7 @@ class PlaylistStore(private val dir: File, private val scope: CoroutineScope) {
         const val MAX_BACKUP_BYTES = 5L * 1024 * 1024
         private const val MAX_NAME = 200
         private const val MAX_DAYS = 20_000
-        private val dayKey = Regex("""\d{4}-\d{2}-\d{2}""")
+        private val dayKey = Regex("""\d{4}-\d{2}(-\d{2})?""")
 
         /**
          * Reads and checks a backup without touching any state. Throws if the file isn't a Dot backup
