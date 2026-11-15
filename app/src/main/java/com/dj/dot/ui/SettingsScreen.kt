@@ -1,11 +1,13 @@
 package com.dj.dot.ui
 
+import android.app.Activity
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings as AndroidSettings
+import androidx.core.app.ActivityCompat
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -34,6 +36,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -504,16 +507,29 @@ private fun BackupRows() {
 /** Connected earphones with their reported battery, or a button to allow reading it. */
 @Composable
 private fun HeadphonesCard() {
+    val context = LocalContext.current
+    val activity = context as? Activity
     val dot = DotApp.instance
     val hp = dot.headphones
     val info by hp.connected.collectAsStateWithLifecycle()
     var allowed by remember { mutableStateOf(hp.hasPermission()) }
+    var askedOnce by rememberSaveable { mutableStateOf(false) }
+
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        allowed = hp.hasPermission()
+        if (allowed) hp.start()
+    }
+
     val ask = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
     ) { granted ->
+        askedOnce = true
         allowed = granted
         if (granted) hp.start()
     }
+    val permanentlyDenied = android.os.Build.VERSION.SDK_INT >= 31 && !allowed && askedOnce && activity != null &&
+        !ActivityCompat.shouldShowRequestPermissionRationale(activity, android.Manifest.permission.BLUETOOTH_CONNECT)
+
     Section("Earphones")
     Column(
         Modifier.padding(horizontal = 20.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Dot.Surface2).padding(16.dp),
@@ -522,9 +538,26 @@ private fun HeadphonesCard() {
         when {
             !allowed -> {
                 Text("See your earphones' battery", color = Dot.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                Text("Needs the Nearby devices permission", color = Dot.Muted, style = MonoSmall)
+                Text(
+                    if (permanentlyDenied) "Nearby devices permission permanently denied. Tap to open Settings" else "Needs the Nearby devices permission",
+                    color = Dot.Muted, style = MonoSmall,
+                )
                 Spacer(Modifier.height(10.dp))
-                Pill("Allow", { if (android.os.Build.VERSION.SDK_INT >= 31) ask.launch(android.Manifest.permission.BLUETOOTH_CONNECT) }, accent = true)
+                Pill(
+                    if (permanentlyDenied) "Open Settings" else "Allow",
+                    {
+                        if (permanentlyDenied) {
+                            runCatching {
+                                context.startActivity(
+                                    Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")),
+                                )
+                            }
+                        } else if (android.os.Build.VERSION.SDK_INT >= 31) {
+                            ask.launch(android.Manifest.permission.BLUETOOTH_CONNECT)
+                        }
+                    },
+                    accent = true,
+                )
             }
             current == null -> {
                 Text("No Bluetooth earphones connected", color = Dot.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)

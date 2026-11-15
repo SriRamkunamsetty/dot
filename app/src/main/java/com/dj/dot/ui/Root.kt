@@ -1,10 +1,14 @@
 package com.dj.dot.ui
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import java.util.concurrent.atomic.AtomicLong
+import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -68,6 +72,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dj.dot.DotApp
@@ -161,30 +166,65 @@ private fun audioPermission() =
 private fun hasAudio(context: Context) =
     ContextCompat.checkSelfPermission(context, audioPermission()) == PackageManager.PERMISSION_GRANTED
 
+private fun openAppSettings(context: Context) {
+    runCatching {
+        context.startActivity(
+            Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:${context.packageName}"),
+            ),
+        )
+    }
+}
+
 @Composable
 fun DotRoot() {
     val context = LocalContext.current
+    val activity = context as? Activity
     var granted by remember { mutableStateOf(hasAudio(context)) }
+    var askedOnce by rememberSaveable { mutableStateOf(false) }
+
+    androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
+        granted = hasAudio(context)
+        onPauseOrDispose { }
+    }
+
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        askedOnce = true
         granted = hasAudio(context)
     }
     LaunchedEffect(granted) { if (granted) DotApp.instance.library.start() }
 
+    val permanentlyDenied = !granted && askedOnce && activity != null &&
+        !ActivityCompat.shouldShowRequestPermissionRationale(activity, audioPermission())
+
     if (!granted) {
-        PermissionScreen {
-            val perms = buildList {
-                add(audioPermission())
-                if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
-            }
-            launcher.launch(perms.toTypedArray())
-        }
+        PermissionScreen(
+            buttonLabel = if (permanentlyDenied) "Open App Settings" else "Allow music access",
+            subtitle = if (permanentlyDenied) "Music access is permanently denied. Tap to open Settings" else null,
+            onAction = {
+                if (permanentlyDenied) {
+                    openAppSettings(context)
+                } else {
+                    val perms = buildList {
+                        add(audioPermission())
+                        if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                    launcher.launch(perms.toTypedArray())
+                }
+            },
+        )
     } else {
         MainUi()
     }
 }
 
 @Composable
-private fun PermissionScreen(onAllow: () -> Unit) {
+private fun PermissionScreen(
+    buttonLabel: String = "Allow music access",
+    subtitle: String? = null,
+    onAction: () -> Unit,
+) {
     Column(
         Modifier.fillMaxSize().background(Dot.Black).padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -195,9 +235,9 @@ private fun PermissionScreen(onAllow: () -> Unit) {
             Box(Modifier.padding(start = 6.dp, bottom = 22.dp).size(16.dp).clip(CircleShape).background(Dot.Red))
         }
         Spacer(Modifier.height(12.dp))
-        Label("Your music. Offline. Nothing else.", align = TextAlign.Center)
+        Label(subtitle ?: "Your music. Offline. Nothing else.", align = TextAlign.Center)
         Spacer(Modifier.height(48.dp))
-        Pill("Allow music access", onAllow, accent = true)
+        Pill(buttonLabel, onAction, accent = true)
     }
 }
 
