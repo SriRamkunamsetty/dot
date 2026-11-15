@@ -72,6 +72,12 @@ class DotDspTest {
         assertArrayEquals(input, run(processor(DspConfig(enabled = false)), input))
     }
 
+    @Test fun `reports inactive when disabled and not settling`() {
+        val dsp = DotDsp(DspParams().apply { current = DspConfig(enabled = false) })
+        dsp.configure(AudioProcessor.AudioFormat(rate, 2, C.ENCODING_PCM_16BIT))
+        assertTrue(!dsp.isActive)
+    }
+
     @Test fun `heavy boost never hard clips`() {
         val loud = DspConfig(enabled = true, bands = FloatArray(10) { 12f }, bassDb = 10f, makeupDb = 12f)
         val input = signal(2f, { t -> 0.7 * sin(2 * PI * 60 * t) + 0.3 * sin(2 * PI * 1000 * t) })

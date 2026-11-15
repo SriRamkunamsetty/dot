@@ -97,6 +97,8 @@ class DotDsp(private val params: DspParams) : BaseAudioProcessor() {
     private var envelope = 0f
     private var limiterRelease = 0f
 
+    override fun isActive(): Boolean = super.isActive() && (params.current.enabled || built != null)
+
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
         // Surround and other formats pass through untouched instead of failing the track.
         if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT || inputAudioFormat.channelCount !in 1..2) {
@@ -120,10 +122,9 @@ class DotDsp(private val params: DspParams) : BaseAudioProcessor() {
     override fun queueInput(inputBuffer: ByteBuffer) {
         val bytes = inputBuffer.remaining()
         if (bytes == 0) return
+        val cfg = params.current
         val out = replaceOutputBuffer(bytes)
         val input = inputBuffer.order(ByteOrder.nativeOrder())
-        // Read the settings once per buffer; everything below works from this snapshot.
-        val cfg = params.current
         if (!cfg.enabled) {
             out.put(input)
             out.flip()
@@ -140,6 +141,8 @@ class DotDsp(private val params: DspParams) : BaseAudioProcessor() {
         val levelling = cfg.levelling
         val monoTarget = if (cfg.mono) 1f else 0f
         val balance = cfg.balance
+        val hasBass = cfg.bassDb != 0f
+        val anyActiveBands = activeBands.any { it }
         val gk = gainStep
         val phaseStep = 2.0 * PI * 0.11 / rate // one turn around the head every ~9 s
 
@@ -158,12 +161,14 @@ class DotDsp(private val params: DspParams) : BaseAudioProcessor() {
 
             l *= preamp
             r *= preamp
-            for (b in 0 until DspParams.BAND_COUNT) {
-                if (!activeBands[b]) continue
-                l = eq[0][b].process(l)
-                r = eq[1][b].process(r)
+            if (anyActiveBands) {
+                for (b in 0 until DspParams.BAND_COUNT) {
+                    if (!activeBands[b]) continue
+                    l = eq[0][b].process(l)
+                    r = eq[1][b].process(r)
+                }
             }
-            if (cfg.bassDb != 0f || !shelf[0].settled) {
+            if (hasBass || !shelf[0].settled) {
                 l = shelf[0].process(l)
                 r = shelf[1].process(r)
             }
