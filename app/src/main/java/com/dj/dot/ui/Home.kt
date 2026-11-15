@@ -39,6 +39,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -48,6 +49,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -135,11 +138,13 @@ private fun SongsTab() {
     val lib by dot.library.data.collectAsStateWithLifecycle()
     val sort by dot.settings.songSort.flow.collectAsStateWithLifecycle()
     val state by dot.engine.state.collectAsStateWithLifecycle()
-    val songs = remember(lib, sort) {
-        when (sort) {
-            1 -> lib.songs.sortedWith(compareBy<Song, String>(String.CASE_INSENSITIVE_ORDER) { it.artist }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.album }.thenBy { it.track })
-            2 -> lib.songs.sortedByDescending { it.dateAdded }
-            else -> lib.songs
+    val songs by produceState(lib.songs, lib, sort) {
+        value = withContext(Dispatchers.Default) {
+            when (sort) {
+                1 -> lib.songs.sortedWith(compareBy<Song, String>(String.CASE_INSENSITIVE_ORDER) { it.artist }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.album }.thenBy { it.track })
+                2 -> lib.songs.sortedByDescending { it.dateAdded }
+                else -> lib.songs
+            }
         }
     }
     val currentId = state.current?.id
