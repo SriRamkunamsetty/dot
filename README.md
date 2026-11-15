@@ -241,7 +241,7 @@ No. Dot has no internet permission, so it cannot connect to the network at all. 
 Yes. Dot runs on any Android phone with Android 10 or newer. Only the Glyph light features need a Nothing Phone (4a); everything else, including the Nothing-style design, works everywhere.
 
 ### How do I make the Nothing Glyph lights react to music?
-Open Now Playing, tap the Visuals button (the dotted bars at the top) and pick a Glyph mode: **Meter** climbs with the bass, **Pulse** flashes on every beat and **Progress** fills as the song plays. You can also set it from Settings.
+Open Now Playing, tap the Visuals button (the dotted bars at the top) and pick a Glyph mode: **Meter** climbs with the bass, **Pulse** flashes on every beat and **Progress** fills as the song plays. You can also set it from Settings. (Note: builds using Nothing's test key require Glyph debug mode enabled under Developer options on your Nothing phone.)
 
 ### Which audio formats does Dot play?
 MP3, AAC, FLAC, ALAC, WAV, Opus and Vorbis. Lossless files play untouched, and surround files skip the effects chain instead of failing.

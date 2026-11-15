@@ -67,28 +67,34 @@ class GlyphLights(
         if (connecting) return
         connecting = true
         val m = manager ?: GlyphManager.getInstance(context.applicationContext).also { manager = it }
-        m.init(object : GlyphManager.Callback {
-            override fun onServiceConnected(name: ComponentName) {
-                scope.launch {
-                    runCatching {
-                        m.register(Glyph.DEVICE_25111)
-                        m.openSession()
-                        ready = true
-                        unavailable.value = false
-                        onReady()
-                    }.onFailure {
-                        Log.w(TAG, "Glyph session failed", it)
-                        unavailable.value = true
+        runCatching {
+            m.init(object : GlyphManager.Callback {
+                override fun onServiceConnected(name: ComponentName) {
+                    scope.launch {
+                        runCatching {
+                            m.register(Glyph.DEVICE_25111)
+                            m.openSession()
+                            ready = true
+                            unavailable.value = false
+                            onReady()
+                        }.onFailure {
+                            Log.w(TAG, "Glyph session failed", it)
+                            unavailable.value = true
+                        }
+                        connecting = false
                     }
+                }
+
+                override fun onServiceDisconnected(name: ComponentName) {
+                    ready = false
                     connecting = false
                 }
-            }
-
-            override fun onServiceDisconnected(name: ComponentName) {
-                ready = false
-                connecting = false
-            }
-        })
+            })
+        }.onFailure {
+            Log.w(TAG, "Glyph manager init failed", it)
+            connecting = false
+            unavailable.value = true
+        }
     }
 
     private fun run(mode: GlyphMode) {
