@@ -33,8 +33,33 @@ class DotService : MediaSessionService() {
         session = MediaSession.Builder(this, engine.sessionPlayer)
             .setSessionActivity(open)
             .setBitmapLoader(ThumbnailLoader(this))
+            .setCallback(object : MediaSession.Callback {
+                override fun onConnect(
+                    session: MediaSession,
+                    controller: MediaSession.ControllerInfo,
+                ): MediaSession.ConnectionResult {
+                    if (isControllerAllowed(session, controller, packageName)) {
+                        return super.onConnect(session, controller)
+                    }
+                    // Protect user listening privacy: untrusted controllers cannot read the queue or metadata.
+                    return MediaSession.ConnectionResult.reject()
+                }
+            })
             .build()
         engine.onSessionPlayerChanged = { session?.player = it }
+    }
+
+    companion object {
+        fun isControllerAllowed(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            currentPackageName: String,
+        ): Boolean {
+            return session.isMediaNotificationController(controller) ||
+                session.isAutoCompanionController(controller) ||
+                controller.packageName == currentPackageName ||
+                controller.isTrusted
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo) = session
