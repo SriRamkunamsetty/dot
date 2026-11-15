@@ -76,4 +76,37 @@ class SpectrumTest {
         feed(s, 2.0, kicks(0.5))
         assertTrue(s.levelsAt(now) == null && s.bpm == 0)
     }
+
+    private fun feedAtRate(s: Spectrum, sampleRate: Int, seconds: Double, sample: (Double) -> Double) {
+        val chunk = 1024
+        var frame = 0
+        val total = (seconds * sampleRate).toInt()
+        while (frame < total) {
+            val buf = ByteBuffer.allocateDirect(chunk * 4).order(ByteOrder.nativeOrder())
+            for (i in 0 until chunk) {
+                val v = (sample((frame + i).toDouble() / sampleRate).coerceIn(-1.0, 1.0) * 32000).toInt().toShort()
+                buf.putShort(v); buf.putShort(v)
+            }
+            buf.flip()
+            frame += chunk
+            now += chunk * 1_000_000_000L / sampleRate
+            s.handleBuffer(buf)
+        }
+    }
+
+    @Test fun `bpm and visualizer behave consistently across 44_1, 48, 96, and 192 kHz`() {
+        listOf(44100, 48000, 96000, 192000).forEach { testRate ->
+            now = 0L
+            val s = Spectrum(clock = { now }).apply {
+                acquire(needsWave = false)
+                flush(testRate, 2, C.ENCODING_PCM_16BIT)
+            }
+            feedAtRate(s, testRate, 14.0, kicks(0.5))
+            assertTrue("bpm at $testRate Hz was ${s.bpm}", s.bpm in 116..124)
+
+            feedAtRate(s, testRate, 1.0) { t -> 0.6 * sin(2 * PI * 80 * t) }
+            val levels = s.levelsAt(now)!!
+            assertTrue("low bands light at $testRate Hz", levels.take(4).max() > levels.takeLast(4).max() + 0.3f)
+        }
+    }
 }
