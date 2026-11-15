@@ -20,7 +20,7 @@ object Dot {
     val Faint = Color(0xFF2E2E2E)
     val Muted = Color(0xFF8A8A8A)
     val White = Color(0xFFF2F2F2)
-    val Red = Color(0xFFD71921)
+    val Red = Color(0xFFE02E35)
 }
 
 /** Round dot-matrix display face, frozen at round dots and black weight to keep the file small. */

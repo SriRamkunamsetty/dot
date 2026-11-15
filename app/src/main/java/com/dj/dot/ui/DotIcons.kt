@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -18,7 +19,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -186,13 +189,23 @@ fun DotIconBtn(
     description: String? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
+    val desc = description ?: when (glyph) {
+        DotIcons.Party -> "Party mode"
+        DotIcons.Visuals -> "Visuals"
+        DotIcons.Sound -> "Sound and equalizer"
+        DotIcons.Heart -> "Favourite"
+        else -> "Action"
+    }
     Box(
         modifier
-            .size(44.dp)
+            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
             .pressable(interaction)
             .clip(CircleShape)
-            .clickable(interaction, ripple(bounded = true), onClick = onClick)
-            .then(if (description != null) Modifier.semantics { contentDescription = description } else Modifier),
+            .clickable(interaction, ripple(bounded = true), role = Role.Button, onClickLabel = desc, onClick = onClick)
+            .semantics {
+                contentDescription = desc
+                role = Role.Button
+            },
         contentAlignment = Alignment.Center,
     ) {
         DotIcon(glyph, color = tint, size = size)

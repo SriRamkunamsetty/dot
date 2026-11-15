@@ -51,6 +51,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -218,15 +221,21 @@ private fun ModeArt(mode: GlyphMode) {
 @Composable
 private fun Tile(label: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit, content: @Composable BoxScope.() -> Unit) {
     val ring by animateFloatAsState(if (selected) 1f else 0f, tween(180), label = "ring")
-    Column(modifier) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick, role = Role.RadioButton, onClickLabel = label)
+            .semantics(mergeDescendants = true) {
+                this.selected = selected
+            },
+    ) {
         Box(
             Modifier
                 .weight(1f)
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(18.dp))
                 .background(Dot.Surface2)
-                .border(2.dp, lerp(Color.Transparent, Dot.White, ring), RoundedCornerShape(18.dp))
-                .clickable(onClick = onClick),
+                .border(2.dp, lerp(Color.Transparent, Dot.White, ring), RoundedCornerShape(18.dp)),
             contentAlignment = Alignment.Center,
         ) {
             content()

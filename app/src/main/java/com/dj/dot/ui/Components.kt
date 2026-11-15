@@ -43,12 +43,28 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Insights
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -165,11 +181,12 @@ fun Pill(
     val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     Row(
         modifier
+            .sizeIn(minHeight = 48.dp)
             .pressable(interaction, 0.93f)
             .clip(CircleShape)
             .background(bg)
             .then(if (selected) Modifier else Modifier.border(1.dp, if (accent) Dot.White else Dot.Line, CircleShape))
-            .clickable(interaction, androidx.compose.material3.ripple(), onClick = onClick)
+            .clickable(interaction, androidx.compose.material3.ripple(), role = Role.Button, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -189,12 +206,35 @@ fun IconBtn(
     description: String? = null,
 ) {
     val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val desc = description ?: when (icon) {
+        Icons.Rounded.PlayArrow -> "Play"
+        Icons.Rounded.Pause -> "Pause"
+        Icons.Rounded.SkipNext -> "Next"
+        Icons.Rounded.SkipPrevious -> "Previous"
+        Icons.Rounded.Close -> "Close"
+        Icons.Rounded.MoreVert -> "More options"
+        Icons.Rounded.Search -> "Search"
+        Icons.Rounded.Settings -> "Settings"
+        Icons.Rounded.Share -> "Share"
+        Icons.Rounded.Insights -> "Listening stats"
+        Icons.Rounded.KeyboardArrowDown -> "Dismiss"
+        Icons.Rounded.KeyboardArrowUp -> "Move up in queue"
+        Icons.AutoMirrored.Rounded.ArrowBack -> "Back"
+        else -> icon.name.substringAfterLast('.').replace(Regex("([a-z])([A-Z])"), "$1 $2").lowercase()
+    }
     Box(
-        modifier.size(44.dp).pressable(interaction).clip(CircleShape)
-            .clickable(interaction, androidx.compose.material3.ripple(), onClick = onClick),
+        modifier
+            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+            .pressable(interaction)
+            .clip(CircleShape)
+            .clickable(interaction, androidx.compose.material3.ripple(), role = Role.Button, onClickLabel = desc, onClick = onClick)
+            .semantics {
+                contentDescription = desc
+                role = Role.Button
+            },
         contentAlignment = Alignment.Center,
     ) {
-        AnimatedIcon(icon, tint, size, description)
+        AnimatedIcon(icon, tint, size, desc)
     }
 }
 
