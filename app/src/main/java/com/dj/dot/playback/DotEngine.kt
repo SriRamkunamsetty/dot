@@ -71,6 +71,17 @@ private val HEADPHONE_TYPES = setOf(
     AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_BLE_HEADSET,
 )
 
+private val CAR_OR_SPEAKER_KEYWORDS = listOf(
+    "car", "auto", "vehicle", "carkit", "uconnect", "sync", "infotainment", "handsfree", "speaker", "soundbar",
+)
+
+private fun isHeadphoneSink(device: AudioDeviceInfo): Boolean {
+    if (!device.isSink || device.type !in HEADPHONE_TYPES) return false
+    val name = device.productName?.toString()?.lowercase() ?: return true
+    if (CAR_OR_SPEAKER_KEYWORDS.any { name.contains(it) }) return false
+    return true
+}
+
 fun Song.toMediaItem(): MediaItem = MediaItem.Builder()
     .setMediaId(id.toString())
     .setUri(uri)
@@ -186,9 +197,17 @@ class DotEngine(
         override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) {
             if (!primed) { primed = true; return }
             if (!settings.playOnConnect.value || wantPlay || items.isEmpty()) return
-            if (added.none { it.isSink && it.type in HEADPHONE_TYPES }) return
-            // Give Bluetooth a moment to take over the audio route before starting.
-            scope.launch { delay(900); if (!wantPlay) play() }
+            val validDevice = added.firstOrNull { isHeadphoneSink(it) } ?: return
+            // Give Bluetooth a moment to take over the audio route before starting, then re-check route.
+            scope.launch {
+                delay(900)
+                if (!wantPlay && settings.playOnConnect.value && items.isNotEmpty()) {
+                    val activeSinks = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                    if (activeSinks.any { it.isSink && it.id == validDevice.id && isHeadphoneSink(it) }) {
+                        play()
+                    }
+                }
+            }
         }
     }
 
