@@ -151,6 +151,14 @@ private fun SongListScreen(
     val app = LocalAppState.current
     val state by dot.engine.state.collectAsStateWithLifecycle()
     val currentId = state.current?.id
+    val keys = remember(songs) {
+        val counts = HashMap<Long, Int>(songs.size)
+        songs.map { song ->
+            val count = counts.getOrDefault(song.id, 0)
+            counts[song.id] = count + 1
+            if (count == 0) "${song.id}" else "${song.id}#$count"
+        }
+    }
 
     LazyColumn(Modifier.fillMaxSize().statusBarsPadding(), contentPadding = PaddingValues(bottom = 16.dp)) {
         item { TopBar("", app::pop, actions) }
@@ -173,11 +181,12 @@ private fun SongListScreen(
             }
         }
         if (songs.isEmpty()) item { EmptyState(emptyTitle, emptyHint) }
-        itemsIndexed(songs, key = { i, s -> "$i-${s.id}" }) { i, s ->
+        itemsIndexed(songs, key = { i, _ -> keys.getOrElse(i) { "$i-${songs[i].id}" } }) { i, s ->
             SongRow(
                 s, s.id == currentId,
                 onClick = { dot.engine.playSongs(songs, i) },
                 onMore = { app.menu = SongMenu(s, playlistId, playlistIndex(i)) },
+                modifier = Modifier.animateItem(),
                 leading = if (trackNumbers) {
                     {
                         Box(Modifier.width(32.dp), contentAlignment = Alignment.CenterStart) {

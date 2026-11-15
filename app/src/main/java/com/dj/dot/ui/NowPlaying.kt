@@ -388,13 +388,26 @@ private fun QueuePanel() {
     val state by engine.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = (state.index - 1).coerceAtLeast(0))
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val keys = remember(state.queue) {
+        val counts = HashMap<Long, Int>(state.queue.size)
+        state.queue.map { song ->
+            val count = counts.getOrDefault(song.id, 0)
+            counts[song.id] = count + 1
+            if (count == 0) "${song.id}" else "${song.id}#$count"
+        }
+    }
     Column(Modifier.fillMaxSize()) {
         Label("Up next · ${countOf(state.queue.size - state.index - 1, "song")}", Modifier.padding(vertical = 8.dp))
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-            itemsIndexed(state.queue, key = { i, s -> "$i-${s.id}" }) { i, s ->
+            itemsIndexed(state.queue, key = { i, _ -> keys.getOrElse(i) { "$i-${state.queue[i].id}" } }) { i, s ->
                 val current = i == state.index
                 Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { engine.jumpTo(i) }.padding(vertical = 6.dp),
+                    Modifier
+                        .animateItem()
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { engine.jumpTo(i) }
+                        .padding(vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Art(s, Modifier.size(42.dp), px = 126, shape = RoundedCornerShape(8.dp))
