@@ -165,7 +165,7 @@ private fun WrappedList(stats: WrappedStats, shareLayer: GraphicsLayer, onShare:
     LazyColumn(Modifier.fillMaxSize().statusBarsPadding(), contentPadding = PaddingValues(bottom = 32.dp)) {
         item {
             TopBar("Wrapped", onBack) {
-                if (stats.totalMinutes > 0) IconBtn(Icons.Rounded.Share, onShare, size = 22.dp)
+                if (stats.totalMinutes > 0) IconBtn(Icons.Rounded.Share, onShare, size = 22.dp, description = "Share wrapped")
             }
         }
         if (stats.totalMinutes < 1) {

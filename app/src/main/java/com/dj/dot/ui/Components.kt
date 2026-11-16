@@ -1,6 +1,9 @@
 package com.dj.dot.ui
 
 import android.content.Context
+import androidx.compose.runtime.collectAsState
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.composed
 import androidx.compose.animation.core.animateFloatAsState
@@ -46,9 +49,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -165,11 +171,12 @@ fun Pill(
     val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     Row(
         modifier
+            .minimumInteractiveComponentSize()
             .pressable(interaction, 0.93f)
             .clip(CircleShape)
             .background(bg)
             .then(if (selected) Modifier else Modifier.border(1.dp, if (accent) Dot.White else Dot.Line, CircleShape))
-            .clickable(interaction, androidx.compose.material3.ripple(), onClick = onClick)
+            .clickable(interaction, androidx.compose.material3.ripple(), role = Role.Button, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -190,8 +197,12 @@ fun IconBtn(
 ) {
     val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     Box(
-        modifier.size(44.dp).pressable(interaction).clip(CircleShape)
-            .clickable(interaction, androidx.compose.material3.ripple(), onClick = onClick),
+        modifier
+            .minimumInteractiveComponentSize()
+            .size(44.dp)
+            .pressable(interaction)
+            .clip(CircleShape)
+            .clickable(interaction, androidx.compose.material3.ripple(), role = Role.Button, onClickLabel = description, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         AnimatedIcon(icon, tint, size, description)
@@ -218,7 +229,7 @@ fun AnimatedIcon(icon: ImageVector, tint: Color, size: Dp, description: String? 
 @Composable
 fun TopBar(title: String, onBack: () -> Unit, actions: @Composable () -> Unit = {}) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        IconBtn(Icons.AutoMirrored.Rounded.ArrowBack, onBack)
+        IconBtn(Icons.AutoMirrored.Rounded.ArrowBack, onBack, description = "Back")
         Label(title, Modifier.weight(1f).padding(start = 4.dp), color = Dot.White)
         actions()
     }
@@ -450,9 +461,16 @@ object ArtLoader {
         override fun sizeOf(key: String, value: ImageBitmap) = value.width * value.height * 4
     }
     private val missing = Collections.synchronizedSet(HashSet<String>())
+    private val _generation = MutableStateFlow(0)
+    val generation: StateFlow<Int> = _generation
     private val io = Dispatchers.IO.limitedParallelism(4)
 
     fun cached(key: String): ImageBitmap? = cache.get(key)
+
+    fun clearMissing() {
+        missing.clear()
+        _generation.value++
+    }
 
     suspend fun load(context: Context, song: Song, key: String, px: Int): ImageBitmap? {
         cache.get(key)?.let { return it }
@@ -475,7 +493,8 @@ fun rememberArtTint(song: Song?): Color? {
     val context = LocalContext.current
     val key = song?.let { "${it.albumId}_192" }
     var tint by remember(key) { mutableStateOf<Color?>(null) }
-    LaunchedEffect(key) {
+    val gen by ArtLoader.generation.collectAsState()
+    LaunchedEffect(key, gen) {
         if (song == null || key == null) return@LaunchedEffect
         val cover = ArtLoader.load(context, song, key, 192) ?: return@LaunchedEffect
         tint = withContext(Dispatchers.Default) { glowOf(cover) }
@@ -502,7 +521,8 @@ fun Art(song: Song?, modifier: Modifier = Modifier, px: Int = 192, shape: Shape 
     val bucket = when { px <= 200 -> 192; px <= 640 -> 600; else -> 1080 }
     val key = song?.let { "${it.albumId}_$bucket" }
     var bitmap by remember(key) { mutableStateOf(key?.let(ArtLoader::cached)) }
-    LaunchedEffect(key) {
+    val gen by ArtLoader.generation.collectAsState()
+    LaunchedEffect(key, gen) {
         if (bitmap == null && song != null && key != null) bitmap = ArtLoader.load(context, song, key, bucket)
     }
     Box(modifier.clip(shape).background(Dot.Surface2), contentAlignment = Alignment.Center) {
@@ -573,7 +593,7 @@ fun SongRow(
             )
         }
         if (current) Box(Modifier.size(6.dp).clip(CircleShape).background(Dot.Red))
-        IconBtn(Icons.Rounded.MoreVert, onMore, tint = Dot.Muted, size = 20.dp)
+        IconBtn(Icons.Rounded.MoreVert, onMore, tint = Dot.Muted, size = 20.dp, description = "More options")
     }
 }
 

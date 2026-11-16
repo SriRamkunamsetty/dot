@@ -73,9 +73,9 @@ fun HomeScreen() {
                 DotTitle("Dot", size = 40.sp)
                 Box(Modifier.padding(start = 4.dp, bottom = 11.dp).size(8.dp).clip(CircleShape).background(Dot.Red))
             }
-            IconBtn(Icons.Rounded.Insights, { app.push(Screen.Wrapped) })
-            IconBtn(Icons.Rounded.Search, { app.push(Screen.Search) })
-            IconBtn(Icons.Rounded.Settings, { app.push(Screen.Settings) })
+            IconBtn(Icons.Rounded.Insights, { app.push(Screen.Wrapped) }, description = "Listening stats")
+            IconBtn(Icons.Rounded.Search, { app.push(Screen.Search) }, description = "Search")
+            IconBtn(Icons.Rounded.Settings, { app.push(Screen.Settings) }, description = "Settings")
         }
         val tabRow = rememberLazyListState()
         // Five pills don't fit a narrow phone, so keep the selected one and its neighbour in view.
