@@ -1,6 +1,9 @@
 package com.dj.dot.ui
 
 import android.content.Context
+import androidx.compose.runtime.collectAsState
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.composed
 import androidx.compose.animation.core.animateFloatAsState
@@ -458,9 +461,16 @@ object ArtLoader {
         override fun sizeOf(key: String, value: ImageBitmap) = value.width * value.height * 4
     }
     private val missing = Collections.synchronizedSet(HashSet<String>())
+    private val _generation = MutableStateFlow(0)
+    val generation: StateFlow<Int> = _generation
     private val io = Dispatchers.IO.limitedParallelism(4)
 
     fun cached(key: String): ImageBitmap? = cache.get(key)
+
+    fun clearMissing() {
+        missing.clear()
+        _generation.value++
+    }
 
     suspend fun load(context: Context, song: Song, key: String, px: Int): ImageBitmap? {
         cache.get(key)?.let { return it }
@@ -483,7 +493,8 @@ fun rememberArtTint(song: Song?): Color? {
     val context = LocalContext.current
     val key = song?.let { "${it.albumId}_192" }
     var tint by remember(key) { mutableStateOf<Color?>(null) }
-    LaunchedEffect(key) {
+    val gen by ArtLoader.generation.collectAsState()
+    LaunchedEffect(key, gen) {
         if (song == null || key == null) return@LaunchedEffect
         val cover = ArtLoader.load(context, song, key, 192) ?: return@LaunchedEffect
         tint = withContext(Dispatchers.Default) { glowOf(cover) }
@@ -510,7 +521,8 @@ fun Art(song: Song?, modifier: Modifier = Modifier, px: Int = 192, shape: Shape 
     val bucket = when { px <= 200 -> 192; px <= 640 -> 600; else -> 1080 }
     val key = song?.let { "${it.albumId}_$bucket" }
     var bitmap by remember(key) { mutableStateOf(key?.let(ArtLoader::cached)) }
-    LaunchedEffect(key) {
+    val gen by ArtLoader.generation.collectAsState()
+    LaunchedEffect(key, gen) {
         if (bitmap == null && song != null && key != null) bitmap = ArtLoader.load(context, song, key, bucket)
     }
     Box(modifier.clip(shape).background(Dot.Surface2), contentAlignment = Alignment.Center) {

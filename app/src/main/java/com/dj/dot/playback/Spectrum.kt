@@ -68,6 +68,7 @@ class Spectrum(
     private var prevFlux = 0f
     @Volatile private var lastBeatNs = 0L
     private val beatTimes = LongArray(16)
+    private val sortedBeatTimes = LongArray(16)
     private var beatHead = 0
     private var beatCount = 0
 
@@ -289,7 +290,9 @@ class Spectrum(
                 beatHead = (beatHead + 1) % beatTimes.size
                 if (beatCount < beatTimes.size) beatCount++
                 if (beatCount >= 6) {
-                    val median = beatTimes.copyOf(beatCount).sorted()[beatCount / 2]
+                    beatTimes.copyInto(sortedBeatTimes, 0, 0, beatCount)
+                    java.util.Arrays.sort(sortedBeatTimes, 0, beatCount)
+                    val median = sortedBeatTimes[beatCount / 2]
                     var tempo = 60_000_000_000.0 / median
                     while (tempo < 70) tempo *= 2
                     while (tempo > 180) tempo /= 2
