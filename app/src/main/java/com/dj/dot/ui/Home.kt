@@ -138,7 +138,7 @@ private fun SongsTab() {
     val lib by dot.library.data.collectAsStateWithLifecycle()
     val sort by dot.settings.songSort.flow.collectAsStateWithLifecycle()
     val state by dot.engine.state.collectAsStateWithLifecycle()
-    val songs by produceState(lib.songs, lib, sort) {
+    val songs by produceState<List<Song>?>(null, lib, sort) {
         value = withContext(Dispatchers.Default) {
             when (sort) {
                 1 -> lib.songs.sortedWith(compareBy<Song, String>(String.CASE_INSENSITIVE_ORDER) { it.artist }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.album }.thenBy { it.track })
@@ -148,29 +148,31 @@ private fun SongsTab() {
         }
     }
     val currentId = state.current?.id
+    val songList = songs
 
     when {
         !lib.ready -> EmptyState("Scanning", "Looking for music on your phone")
-        songs.isEmpty() -> EmptyState("No music", "Copy songs into the Music folder and they'll show up here.")
+        songList == null -> Unit
+        songList.isEmpty() -> EmptyState("No music", "Copy songs into the Music folder and they'll show up here.")
         else -> Box(Modifier.fillMaxSize()) {
             val listState = rememberLazyListState()
             LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(bottom = 16.dp)) {
                 item(key = "header") {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Label(countOf(songs.size, "song"), Modifier.weight(1f))
+                        Label(countOf(songList.size, "song"), Modifier.weight(1f))
                         Pill(sortNames[sort], { dot.settings.songSort.set((sort + 1) % sortNames.size) })
                         Spacer(Modifier.width(8.dp))
-                        Pill("Shuffle", { dot.engine.playSongs(songs, shuffleAll = true) }, accent = true, icon = Icons.Rounded.Shuffle)
+                        Pill("Shuffle", { dot.engine.playSongs(songList, shuffleAll = true) }, accent = true, icon = Icons.Rounded.Shuffle)
                     }
                 }
-                itemsIndexed(songs, key = { _, s -> s.id }) { i, s ->
-                    SongRow(s, s.id == currentId, onClick = { dot.engine.playSongs(songs, i) }, onMore = { app.menu = SongMenu(s) })
+                itemsIndexed(songList, key = { _, s -> s.id }) { i, s ->
+                    SongRow(s, s.id == currentId, onClick = { dot.engine.playSongs(songList, i) }, onMore = { app.menu = SongMenu(s) })
                 }
             }
             FastScroller(
-                listState, songs.size, itemOffset = 1,
+                listState, songList.size, itemOffset = 1,
                 labelFor = { i ->
-                    val song = songs[i]
+                    val song = songList[i]
                     when (sort) {
                         1 -> initial(song.artist)
                         2 -> monthLabel.format(java.util.Date(song.dateAdded * 1000))

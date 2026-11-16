@@ -111,19 +111,7 @@ fun WrappedScreen() {
     val hours by dot.store.hourMs.collectAsStateWithLifecycle()
     val shareLayer = rememberGraphicsLayer()
 
-    val stats by produceState(
-        WrappedStats(
-            totalMinutes = 0,
-            since = dot.store.trackingSince,
-            topSongs = emptyList(),
-            topArtists = emptyList(),
-            hours = emptyList(),
-            week = emptyList(),
-            streak = 0,
-            songsHeard = 0,
-        ),
-        lib, listen, daily, hours,
-    ) {
+    val stats by produceState<WrappedStats?>(null, lib, listen, daily, hours) {
         value = withContext(Dispatchers.Default) {
             val songs = listen.entries.mapNotNull { (id, ms) -> lib.byId[id]?.let { it to ms } }.sortedByDescending { it.second }
             val artists = songs.groupBy { it.first.artist }
@@ -170,9 +158,10 @@ fun WrappedScreen() {
         }
     }
 
+    val s = stats ?: return
     var showList by rememberSaveable { mutableStateOf(false) }
-    if (showList || stats.totalMinutes < 1) WrappedList(stats, shareLayer, onShare = { share() }, onBack = app::pop)
-    else WrappedStories(stats, shareLayer, onShare = { share() }, onAll = { showList = true }, onClose = app::pop)
+    if (showList || s.totalMinutes < 1) WrappedList(s, shareLayer, onShare = { share() }, onBack = app::pop)
+    else WrappedStories(s, shareLayer, onShare = { share() }, onAll = { showList = true }, onClose = app::pop)
 }
 
 /** Every stat on one scrolling page, with the shareable summary card on top. */
