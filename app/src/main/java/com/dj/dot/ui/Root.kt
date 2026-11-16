@@ -50,7 +50,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -107,6 +111,41 @@ class AppState(var onScreenPopped: ((Screen) -> Unit)? = null) {
         }
     }
 }
+
+private fun screenFromKey(key: String): Screen? = when {
+    key == "home" -> Screen.Home
+    key == "search" -> Screen.Search
+    key == "settings" -> Screen.Settings
+    key == "eq" -> Screen.Equalizer
+    key == "wrapped" -> Screen.Wrapped
+    key.startsWith("album/") -> key.removePrefix("album/").toLongOrNull()?.let { Screen.Album(it) }
+    key.startsWith("artist/") -> Screen.Artist(key.removePrefix("artist/"))
+    key.startsWith("folder/") -> Screen.Folder(key.removePrefix("folder/"))
+    key.startsWith("playlist/") -> Screen.Playlist(key.removePrefix("playlist/"))
+    else -> null
+}
+
+val AppStateSaver: Saver<AppState, Any> = listSaver(
+    save = { app ->
+        listOf(
+            app.stack.map { it.key },
+            app.nowPlaying,
+        )
+    },
+    restore = { value ->
+        val app = AppState()
+        val keys = (value.getOrNull(0) as? List<*>)?.filterIsInstance<String>()
+        if (!keys.isNullOrEmpty()) {
+            val restored = keys.mapNotNull(::screenFromKey)
+            if (restored.isNotEmpty()) {
+                app.stack.clear()
+                app.stack.addAll(restored)
+            }
+        }
+        app.nowPlaying = (value.getOrNull(1) as? Boolean) ?: false
+        app
+    },
+)
 
 val LocalAppState = staticCompositionLocalOf<AppState> { error("AppState not provided") }
 
@@ -166,7 +205,9 @@ private fun PermissionScreen(onAllow: () -> Unit) {
 @Composable
 private fun MainUi() {
     val holder = rememberSaveableStateHolder()
-    val app = remember { AppState(onScreenPopped = { holder.removeState(it.key) }) }
+    val app = rememberSaveable(saver = AppStateSaver) { AppState() }
+    // Restored states are built without the callback, so attach it here for both cases.
+    SideEffect { app.onScreenPopped = { holder.removeState(it.key) } }
     val engine = DotApp.instance.engine
     val state by engine.state.collectAsStateWithLifecycle()
 
