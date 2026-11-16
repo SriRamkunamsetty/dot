@@ -20,7 +20,12 @@ import org.json.JSONObject
 import java.io.File
 
 /** Indexes local audio from MediaStore and re-indexes when files change. */
-class Library(private val context: Context, private val scope: CoroutineScope, private val settings: Settings) {
+class Library(
+    private val context: Context,
+    private val scope: CoroutineScope,
+    private val settings: Settings,
+    private val onScanComplete: () -> Unit = {},
+) {
     private val _data = MutableStateFlow(LibraryData())
     val data: StateFlow<LibraryData> = _data
     val scanning = MutableStateFlow(false)
@@ -60,6 +65,7 @@ class Library(private val context: Context, private val scope: CoroutineScope, p
             val songs = withContext(Dispatchers.IO) { query() }
             _data.value = withContext(Dispatchers.Default) { LibraryData.build(songs) }
             scanning.value = false
+            onScanComplete()
             withContext(Dispatchers.IO) { writeCache(key, songs) }
         }
     }

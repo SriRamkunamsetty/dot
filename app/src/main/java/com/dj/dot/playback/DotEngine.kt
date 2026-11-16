@@ -12,6 +12,7 @@ import android.media.audiofx.AudioEffect
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.core.content.ContextCompat
 import androidx.media3.common.AudioAttributes
@@ -165,6 +166,7 @@ class DotEngine(
     private var sleepJob: Job? = null
     private var lastCountedId = -1L
     private var lyricsFor = -1L
+    private var consecutiveErrors = 0
 
     var sessionPlayer: Player = SessionPlayer(players[0])
         private set
@@ -287,7 +289,10 @@ class DotEngine(
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
-            if (p === active && playbackState == Player.STATE_ENDED) { wantPlay = false; publish() }
+            if (p === active) {
+                if (playbackState == Player.STATE_READY && p.isPlaying) consecutiveErrors = 0
+                if (playbackState == Player.STATE_ENDED) { wantPlay = false; consecutiveErrors = 0; publish() }
+            }
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
@@ -303,13 +308,29 @@ class DotEngine(
 
         override fun onPlayerError(error: PlaybackException) {
             if (p !== active) return
+            consecutiveErrors++
+            val maxErrors = items.size.coerceAtLeast(1)
+            if (consecutiveErrors >= maxErrors) {
+                consecutiveErrors = 0
+                wantPlay = false
+                publish()
+                library.rescan()
+                scope.launch(Dispatchers.Main) {
+                    Toast.makeText(app, "Playback stopped: unplayable files in queue", Toast.LENGTH_LONG).show()
+                }
+                return
+            }
             val next = nextIndex()
             if (next != null && next != _state.value.index) {
                 active.seekTo(next, 0)
                 active.prepare()
             } else {
+                consecutiveErrors = 0
                 wantPlay = false
                 publish()
+                scope.launch(Dispatchers.Main) {
+                    Toast.makeText(app, "Playback stopped: unplayable track", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
@@ -326,6 +347,7 @@ class DotEngine(
     /** Plays [songs] from [start]. If shuffle is on, [start] plays first and the rest is shuffled. */
     fun playSongs(songs: List<Song>, start: Int = 0, shuffleAll: Boolean = false) {
         if (songs.isEmpty()) return
+        consecutiveErrors = 0
         val st = _state.value
         val first = start.coerceIn(0, songs.lastIndex)
         val shuffle = shuffleAll || st.shuffle
@@ -368,6 +390,7 @@ class DotEngine(
 
     fun play() {
         if (items.isEmpty() || !requestFocus()) return
+        consecutiveErrors = 0
         val p = active
         if (p.playbackState == Player.STATE_IDLE) p.prepare()
         if (p.playbackState == Player.STATE_ENDED) p.seekTo(0, 0)
@@ -413,6 +436,7 @@ class DotEngine(
 
     fun jumpTo(index: Int) {
         if (index !in items.indices) return
+        consecutiveErrors = 0
         if (wantPlay && settings.fadeOnSkip.value && settings.skipFadeMs.value > 0) {
             crossfadeTo(index, settings.skipFadeMs.value.toLong())
         } else {

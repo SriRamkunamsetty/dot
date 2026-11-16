@@ -138,10 +138,10 @@ fun PartyMode(onExit: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconBtn(Icons.Rounded.SkipPrevious, { engine.previous(); touches++ })
-                IconBtn(if (state.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, { engine.toggle(); touches++ }, size = 30.dp)
-                IconBtn(Icons.Rounded.SkipNext, { engine.next(); touches++ })
-                IconBtn(Icons.Rounded.Close, onExit, tint = Dot.Muted)
+                IconBtn(Icons.Rounded.SkipPrevious, { engine.previous(); touches++ }, description = "Previous")
+                IconBtn(if (state.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, { engine.toggle(); touches++ }, size = 30.dp, description = if (state.playing) "Pause" else "Play")
+                IconBtn(Icons.Rounded.SkipNext, { engine.next(); touches++ }, description = "Next")
+                IconBtn(Icons.Rounded.Close, onExit, tint = Dot.Muted, description = "Close party mode")
             }
         }
     }
