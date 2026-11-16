@@ -116,18 +116,26 @@ class PlaylistStore(private val dir: File, private val scope: CoroutineScope) {
         val lrcKeys = sp.all.keys.filter { it.startsWith("lrc_off_") }
         if (lrcKeys.isEmpty()) return
         val map = _lyricsOffsets.value.toMutableMap()
-        val editor = sp.edit()
         for (k in lrcKeys) {
             val songId = k.removePrefix("lrc_off_").toLongOrNull()
             val offset = (sp.all[k] as? Number)?.toInt() ?: 0
             if (songId != null && songId !in map) {
                 map[songId] = offset
             }
-            editor.remove(k)
         }
-        editor.apply()
         _lyricsOffsets.value = map
-        save()
+        scope.launch(io) {
+            val json = toJson()
+            if (!keptPrevious) {
+                keptPrevious = true
+                if (read(file) != null) runCatching { previous.write(file.readFully()) }
+            }
+            if (runCatching { file.write(json.toByteArray()) }.isSuccess) {
+                val editor = sp.edit()
+                for (k in lrcKeys) editor.remove(k)
+                editor.apply()
+            }
+        }
     }
 
     fun create(name: String, songIds: List<Long> = emptyList()): String {

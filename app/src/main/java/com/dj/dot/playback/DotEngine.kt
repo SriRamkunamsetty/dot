@@ -163,6 +163,7 @@ class DotEngine(
     private var items: MutableList<MediaItem> = ArrayList()
     private var originalQueue: List<Song>? = null
     private val queueFile = AtomicFile(File(app.filesDir, "queue.bin"))
+    private val queueIo = Dispatchers.IO.limitedParallelism(1)
     private var lastSavedQueueIds: List<Long>? = null
 
     // Final volume of each player = gain[i] * master * duck.
@@ -873,27 +874,28 @@ class DotEngine(
 
     fun hasSavedQueue(): Boolean = queueFile.baseFile.exists() || settings.queueIds.value.isNotEmpty()
 
-    private fun writeQueueFile(ids: List<Long>) {
-        runCatching {
-            val out = queueFile.startWrite()
-            try {
-                val dos = DataOutputStream(out)
-                dos.writeInt(ids.size)
-                for (id in ids) dos.writeLong(id)
-                dos.flush()
-                queueFile.finishWrite(out)
-            } catch (e: Throwable) {
-                queueFile.failWrite(out)
-                throw e
-            }
+    private fun writeQueueFile(ids: List<Long>): Boolean = runCatching {
+        val out = queueFile.startWrite()
+        try {
+            val dos = DataOutputStream(out)
+            dos.writeInt(ids.size)
+            for (id in ids) dos.writeLong(id)
+            dos.flush()
+            queueFile.finishWrite(out)
+            true
+        } catch (e: Throwable) {
+            queueFile.failWrite(out)
+            throw e
         }
-    }
+    }.getOrDefault(false)
 
     private fun readQueueFile(): List<Long>? = runCatching {
         if (!queueFile.baseFile.exists()) return@runCatching null
         val bytes = queueFile.readFully()
+        if (bytes.size < 4) return@runCatching null
         val dis = DataInputStream(ByteArrayInputStream(bytes))
         val size = dis.readInt()
+        require(size in 0..(bytes.size - 4) / 8)
         val list = ArrayList<Long>(size)
         for (i in 0 until size) list.add(dis.readLong())
         list
@@ -902,9 +904,10 @@ class DotEngine(
     private fun saveQueueIfChanged(songs: List<Song>) {
         val ids = songs.map { it.id }
         if (ids == lastSavedQueueIds) return
-        lastSavedQueueIds = ids
-        scope.launch(Dispatchers.IO) {
-            writeQueueFile(ids)
+        scope.launch(queueIo) {
+            if (writeQueueFile(ids)) {
+                lastSavedQueueIds = ids
+            }
         }
     }
 
@@ -919,13 +922,15 @@ class DotEngine(
 
     private fun restore(lib: LibraryData) {
         if (items.isNotEmpty()) return
-        val savedIds = readQueueFile() ?: settings.queueIds.value.split(',').mapNotNull { it.toLongOrNull() }
+        val legacy = settings.queueIds.value
+        val savedIds = readQueueFile() ?: legacy.split(',').mapNotNull { it.toLongOrNull() }
         val songs = savedIds.mapNotNull(lib.byId::get)
         if (songs.isEmpty()) return
-        lastSavedQueueIds = savedIds
-        if (settings.queueIds.value.isNotEmpty()) {
+        if (legacy.isNotEmpty()) {
+            writeQueueFile(savedIds)
             settings.queueIds.set("")
         }
+        lastSavedQueueIds = savedIds
         val index = settings.queueIndex.value.coerceIn(0, songs.lastIndex)
         setQueue(songs)
         _state.value = _state.value.copy(shuffle = settings.shuffle.value, repeat = settings.repeat.value)
