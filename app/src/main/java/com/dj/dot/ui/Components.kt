@@ -553,10 +553,11 @@ fun SongRow(
     current: Boolean,
     onClick: () -> Unit,
     onMore: () -> Unit,
+    modifier: Modifier = Modifier,
     leading: (@Composable () -> Unit)? = null,
 ) {
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 20.dp, end = 6.dp, top = 7.dp, bottom = 7.dp),
+        modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 20.dp, end = 6.dp, top = 7.dp, bottom = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (leading != null) leading() else Art(song, Modifier.size(48.dp), px = 144, shape = RoundedCornerShape(8.dp))
