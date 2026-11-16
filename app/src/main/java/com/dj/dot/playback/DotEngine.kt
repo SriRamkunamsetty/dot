@@ -367,7 +367,6 @@ class DotEngine(
         setQueue(list)
         _state.value = _state.value.copy(shuffle = shuffle)
         if (fade) {
-            active.setMediaItems(items, index, 0)
             crossfadeTo(index, settings.skipFadeMs.value.toLong())
         } else {
             cancelFade()
@@ -616,7 +615,7 @@ class DotEngine(
         gain[inI] = 0f
         applyVolumes()
         inc.pauseAtEndOfMediaItems = false
-        if (inc.mediaItemCount == items.size) {
+        if (inc.mediaItemCount == items.size && index in 0 until items.size && inc.getMediaItemAt(index).mediaId == items[index].mediaId) {
             inc.seekTo(index, 0)
         } else {
             inc.setMediaItems(items, index, 0)
