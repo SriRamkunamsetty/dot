@@ -124,10 +124,11 @@ fun NowPlayingScreen(onClose: () -> Unit) {
             .background(Dot.Black)
             .dotGlow(if (wide) Offset(0.25f, 0.5f) else Offset(0.5f, 0.3f)) { glow }
             .pointerInput(Unit) {
+                val threshold = 80.dp.toPx()
                 detectVerticalDragGestures(
                     // Down closes the player, up opens the queue.
                     onDragEnd = {
-                        if (pullDown > 220f) onClose() else if (pullDown < -220f) panel = Panel.Queue
+                        if (pullDown > threshold) onClose() else if (pullDown < -threshold) panel = Panel.Queue
                         pullDown = 0f
                     },
                     onDragCancel = { pullDown = 0f },
@@ -280,9 +281,10 @@ private fun ArtPanel(song: com.dj.dot.data.Song, playing: Boolean, showViz: Bool
                 // On the record, sideways drags scratch instead of skipping.
                 .pointerInput(artStyle) {
                     if (artStyle == ArtStyle.Vinyl) return@pointerInput
+                    val threshold = 48.dp.toPx()
                     detectHorizontalDragGestures(
                         onDragEnd = {
-                            if (dragX < -120f) engine.next() else if (dragX > 120f) engine.previous()
+                            if (dragX < -threshold) engine.next() else if (dragX > threshold) engine.previous()
                             dragX = 0f
                         },
                         onDragCancel = { dragX = 0f },
@@ -388,13 +390,26 @@ private fun QueuePanel() {
     val state by engine.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = (state.index - 1).coerceAtLeast(0))
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val keys = remember(state.queue) {
+        val counts = HashMap<Long, Int>(state.queue.size)
+        state.queue.map { song ->
+            val count = counts.getOrDefault(song.id, 0)
+            counts[song.id] = count + 1
+            if (count == 0) "${song.id}" else "${song.id}#$count"
+        }
+    }
     Column(Modifier.fillMaxSize()) {
         Label("Up next · ${countOf(state.queue.size - state.index - 1, "song")}", Modifier.padding(vertical = 8.dp))
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-            itemsIndexed(state.queue, key = { i, s -> "$i-${s.id}" }) { i, s ->
+            itemsIndexed(state.queue, key = { i, _ -> keys.getOrElse(i) { "$i-${state.queue[i].id}" } }) { i, s ->
                 val current = i == state.index
                 Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { engine.jumpTo(i) }.padding(vertical = 6.dp),
+                    Modifier
+                        .animateItem()
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { engine.jumpTo(i) }
+                        .padding(vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Art(s, Modifier.size(42.dp), px = 126, shape = RoundedCornerShape(8.dp))
