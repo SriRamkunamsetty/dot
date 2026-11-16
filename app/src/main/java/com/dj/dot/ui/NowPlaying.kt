@@ -139,10 +139,10 @@ fun NowPlayingScreen(onClose: () -> Unit) {
             .padding(horizontal = 22.dp),
     ) {
         Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconBtn(Icons.Rounded.KeyboardArrowDown, onClose, size = 30.dp)
-            DotIconBtn(DotIcons.Party, { app.party = true })
+            IconBtn(Icons.Rounded.KeyboardArrowDown, onClose, size = 30.dp, description = "Dismiss")
+            DotIconBtn(DotIcons.Party, { app.party = true }, description = "Party mode")
             Label("Now playing", Modifier.weight(1f), color = Dot.White, align = TextAlign.Center)
-            DotIconBtn(DotIcons.Visuals, { visualsSheet = true }, tint = if (glyphMode != 0) Dot.Red else Dot.White)
+            DotIconBtn(DotIcons.Visuals, { visualsSheet = true }, tint = if (glyphMode != 0) Dot.Red else Dot.White, description = "Visuals")
             DotIconBtn(DotIcons.Sound, { app.push(Screen.Equalizer) }, description = "Sound and equalizer")
         }
 
@@ -194,6 +194,7 @@ fun NowPlayingScreen(onClose: () -> Unit) {
                     },
                     Modifier.graphicsLayer { scaleX = pop.value; scaleY = pop.value },
                     tint = if (fav) Dot.Red else Dot.White,
+                    description = if (fav) "Remove from favourites" else "Add to favourites",
                 )
             }
 
@@ -202,8 +203,8 @@ fun NowPlayingScreen(onClose: () -> Unit) {
 
             Spacer(Modifier.height(10.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                ToggleIcon(Icons.Rounded.Shuffle, state.shuffle, engine::toggleShuffle)
-                IconBtn(Icons.Rounded.SkipPrevious, engine::previous, size = 34.dp)
+                ToggleIcon(Icons.Rounded.Shuffle, state.shuffle, engine::toggleShuffle, description = if (state.shuffle) "Shuffle on" else "Shuffle off")
+                IconBtn(Icons.Rounded.SkipPrevious, engine::previous, size = 34.dp, description = "Previous")
                 val playInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
                 val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
                 Box(
@@ -220,13 +221,18 @@ fun NowPlayingScreen(onClose: () -> Unit) {
                         },
                     contentAlignment = Alignment.Center,
                 ) {
-                    AnimatedIcon(if (state.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, Dot.Black, 38.dp)
+                    AnimatedIcon(if (state.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, Dot.Black, 38.dp, description = if (state.playing) "Pause" else "Play")
                 }
-                IconBtn(Icons.Rounded.SkipNext, engine::next, size = 34.dp)
+                IconBtn(Icons.Rounded.SkipNext, engine::next, size = 34.dp, description = "Next")
                 ToggleIcon(
                     if (state.repeat == Player.REPEAT_MODE_ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
                     state.repeat != Player.REPEAT_MODE_OFF,
                     engine::cycleRepeat,
+                    description = when (state.repeat) {
+                        Player.REPEAT_MODE_ONE -> "Repeat one"
+                        Player.REPEAT_MODE_ALL -> "Repeat all"
+                        else -> "Repeat off"
+                    },
                 )
             }
 
@@ -419,8 +425,8 @@ private fun QueuePanel() {
                         Text(s.artist, color = Dot.Muted, style = SansSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     if (!current) {
-                        IconBtn(Icons.Rounded.KeyboardArrowUp, { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.SegmentTick); engine.moveInQueue(i, i - 1) }, tint = Dot.Muted, size = 20.dp)
-                        IconBtn(Icons.Rounded.Close, { engine.removeFromQueue(i) }, tint = Dot.Muted, size = 18.dp)
+                        IconBtn(Icons.Rounded.KeyboardArrowUp, { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.SegmentTick); engine.moveInQueue(i, i - 1) }, tint = Dot.Muted, size = 20.dp, description = "Move up in queue")
+                        IconBtn(Icons.Rounded.Close, { engine.removeFromQueue(i) }, tint = Dot.Muted, size = 18.dp, description = "Remove from queue")
                     }
                 }
             }
@@ -429,9 +435,9 @@ private fun QueuePanel() {
 }
 
 @Composable
-private fun ToggleIcon(icon: ImageVector, on: Boolean, onClick: () -> Unit) {
+private fun ToggleIcon(icon: ImageVector, on: Boolean, onClick: () -> Unit, description: String? = null) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        IconBtn(icon, onClick, tint = if (on) Dot.White else Dot.Muted)
+        IconBtn(icon, onClick, tint = if (on) Dot.White else Dot.Muted, description = description)
         Box(Modifier.size(4.dp).clip(CircleShape).background(if (on) Dot.Red else Dot.Black))
     }
 }
@@ -465,7 +471,7 @@ private fun SleepSheet(onDismiss: () -> Unit) {
                     DotTitle("Sleep timer", size = 24.sp)
                     Label("Wind the dial, then tap start")
                 }
-                IconBtn(Icons.Rounded.Close, onDismiss, tint = Dot.Muted)
+                IconBtn(Icons.Rounded.Close, onDismiss, tint = Dot.Muted, description = "Close sleep timer")
             }
             Spacer(Modifier.height(8.dp))
             SleepDial(minutes, { minutes = it }, Modifier.fillMaxWidth(0.7f).widthIn(max = 300.dp))

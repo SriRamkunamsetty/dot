@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
@@ -189,23 +190,14 @@ fun DotIconBtn(
     description: String? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
-    val desc = description ?: when (glyph) {
-        DotIcons.Party -> "Party mode"
-        DotIcons.Visuals -> "Visuals"
-        DotIcons.Sound -> "Sound and equalizer"
-        DotIcons.Heart -> "Favourite"
-        else -> "Action"
-    }
     Box(
         modifier
-            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+            .minimumInteractiveComponentSize()
+            .size(44.dp)
             .pressable(interaction)
             .clip(CircleShape)
-            .clickable(interaction, ripple(bounded = true), role = Role.Button, onClickLabel = desc, onClick = onClick)
-            .semantics {
-                contentDescription = desc
-                role = Role.Button
-            },
+            .clickable(interaction, ripple(bounded = true), role = Role.Button, onClickLabel = description, onClick = onClick)
+            .then(if (description != null) Modifier.semantics { contentDescription = description } else Modifier),
         contentAlignment = Alignment.Center,
     ) {
         DotIcon(glyph, color = tint, size = size)

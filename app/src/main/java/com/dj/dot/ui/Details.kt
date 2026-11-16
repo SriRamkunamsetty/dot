@@ -108,7 +108,7 @@ fun PlaylistScreen(id: String) {
                 playlistIndex = { rows[it].first },
                 actions = {
                     Box {
-                        IconBtn(Icons.Rounded.MoreVert, { menu = true })
+                        IconBtn(Icons.Rounded.MoreVert, { menu = true }, description = "More options")
                         DropdownMenu(menu, { menu = false }) {
                             DropdownMenuItem({ Text("Rename") }, { menu = false; renaming = true })
                             DropdownMenuItem({ Text("Delete", color = Dot.Red) }, { menu = false; dot.store.delete(playlist.id); app.pop() })

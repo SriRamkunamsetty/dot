@@ -287,8 +287,8 @@ private fun MiniPlayer(song: Song, playing: Boolean, onOpen: () -> Unit) {
                 Text(song.title, color = Dot.White, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(song.artist, color = Dot.Muted, style = SansSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            IconBtn(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.ContextClick); engine.toggle() }, size = 28.dp)
-            IconBtn(Icons.Rounded.SkipNext, engine::next)
+            IconBtn(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.ContextClick); engine.toggle() }, size = 28.dp, description = if (playing) "Pause" else "Play")
+            IconBtn(Icons.Rounded.SkipNext, engine::next, description = "Next")
         }
         MiniProgress()
     }

@@ -47,6 +47,7 @@ import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Close
@@ -181,7 +182,7 @@ fun Pill(
     val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     Row(
         modifier
-            .sizeIn(minHeight = 48.dp)
+            .minimumInteractiveComponentSize()
             .pressable(interaction, 0.93f)
             .clip(CircleShape)
             .background(bg)
@@ -206,35 +207,16 @@ fun IconBtn(
     description: String? = null,
 ) {
     val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-    val desc = description ?: when (icon) {
-        Icons.Rounded.PlayArrow -> "Play"
-        Icons.Rounded.Pause -> "Pause"
-        Icons.Rounded.SkipNext -> "Next"
-        Icons.Rounded.SkipPrevious -> "Previous"
-        Icons.Rounded.Close -> "Close"
-        Icons.Rounded.MoreVert -> "More options"
-        Icons.Rounded.Search -> "Search"
-        Icons.Rounded.Settings -> "Settings"
-        Icons.Rounded.Share -> "Share"
-        Icons.Rounded.Insights -> "Listening stats"
-        Icons.Rounded.KeyboardArrowDown -> "Dismiss"
-        Icons.Rounded.KeyboardArrowUp -> "Move up in queue"
-        Icons.AutoMirrored.Rounded.ArrowBack -> "Back"
-        else -> icon.name.substringAfterLast('.').replace(Regex("([a-z])([A-Z])"), "$1 $2").lowercase()
-    }
     Box(
         modifier
-            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+            .minimumInteractiveComponentSize()
+            .size(44.dp)
             .pressable(interaction)
             .clip(CircleShape)
-            .clickable(interaction, androidx.compose.material3.ripple(), role = Role.Button, onClickLabel = desc, onClick = onClick)
-            .semantics {
-                contentDescription = desc
-                role = Role.Button
-            },
+            .clickable(interaction, androidx.compose.material3.ripple(), role = Role.Button, onClickLabel = description, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        AnimatedIcon(icon, tint, size, desc)
+        AnimatedIcon(icon, tint, size, description)
     }
 }
 
@@ -258,7 +240,7 @@ fun AnimatedIcon(icon: ImageVector, tint: Color, size: Dp, description: String? 
 @Composable
 fun TopBar(title: String, onBack: () -> Unit, actions: @Composable () -> Unit = {}) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        IconBtn(Icons.AutoMirrored.Rounded.ArrowBack, onBack)
+        IconBtn(Icons.AutoMirrored.Rounded.ArrowBack, onBack, description = "Back")
         Label(title, Modifier.weight(1f).padding(start = 4.dp), color = Dot.White)
         actions()
     }
@@ -613,7 +595,7 @@ fun SongRow(
             )
         }
         if (current) Box(Modifier.size(6.dp).clip(CircleShape).background(Dot.Red))
-        IconBtn(Icons.Rounded.MoreVert, onMore, tint = Dot.Muted, size = 20.dp)
+        IconBtn(Icons.Rounded.MoreVert, onMore, tint = Dot.Muted, size = 20.dp, description = "More options")
     }
 }
 
