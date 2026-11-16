@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import java.util.concurrent.atomic.AtomicLong
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -49,7 +50,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -85,12 +90,12 @@ sealed interface Screen {
 /** A song menu opened from a list; [playlistId]/[index] allow "remove from playlist". */
 data class SongMenu(val song: Song, val playlistId: String? = null, val index: Int = -1)
 
-class AppState {
+class AppState(var onScreenPopped: ((Screen) -> Unit)? = null) {
     val stack = mutableStateListOf<Screen>(Screen.Home)
     var nowPlaying by mutableStateOf(false)
     var party by mutableStateOf(false)
     var bedside by mutableStateOf(false)
-    var lastTouch by mutableStateOf(0L)
+    val lastTouch = AtomicLong(android.os.SystemClock.uptimeMillis())
     var menu by mutableStateOf<SongMenu?>(null)
     var addToPlaylist by mutableStateOf<List<Song>?>(null)
 
@@ -100,9 +105,47 @@ class AppState {
     }
 
     fun pop() {
-        if (stack.size > 1) stack.removeAt(stack.lastIndex)
+        if (stack.size > 1) {
+            val popped = stack.removeAt(stack.lastIndex)
+            if (stack.none { it.key == popped.key }) onScreenPopped?.invoke(popped)
+        }
     }
 }
+
+private fun screenFromKey(key: String): Screen? = when {
+    key == "home" -> Screen.Home
+    key == "search" -> Screen.Search
+    key == "settings" -> Screen.Settings
+    key == "eq" -> Screen.Equalizer
+    key == "wrapped" -> Screen.Wrapped
+    key.startsWith("album/") -> key.removePrefix("album/").toLongOrNull()?.let { Screen.Album(it) }
+    key.startsWith("artist/") -> Screen.Artist(key.removePrefix("artist/"))
+    key.startsWith("folder/") -> Screen.Folder(key.removePrefix("folder/"))
+    key.startsWith("playlist/") -> Screen.Playlist(key.removePrefix("playlist/"))
+    else -> null
+}
+
+val AppStateSaver: Saver<AppState, Any> = listSaver(
+    save = { app ->
+        listOf(
+            app.stack.map { it.key },
+            app.nowPlaying,
+        )
+    },
+    restore = { value ->
+        val app = AppState()
+        val keys = (value.getOrNull(0) as? List<*>)?.filterIsInstance<String>()
+        if (!keys.isNullOrEmpty()) {
+            val restored = keys.mapNotNull(::screenFromKey)
+            if (restored.isNotEmpty()) {
+                app.stack.clear()
+                app.stack.addAll(restored)
+            }
+        }
+        app.nowPlaying = (value.getOrNull(1) as? Boolean) ?: false
+        app
+    },
+)
 
 val LocalAppState = staticCompositionLocalOf<AppState> { error("AppState not provided") }
 
@@ -161,10 +204,12 @@ private fun PermissionScreen(onAllow: () -> Unit) {
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun MainUi() {
-    val app = remember { AppState() }
+    val holder = rememberSaveableStateHolder()
+    val app = rememberSaveable(saver = AppStateSaver) { AppState() }
+    // Restored states are built without the callback, so attach it here for both cases.
+    SideEffect { app.onScreenPopped = { holder.removeState(it.key) } }
     val engine = DotApp.instance.engine
     val state by engine.state.collectAsStateWithLifecycle()
-    val holder = rememberSaveableStateHolder()
 
     CompositionLocalProvider(LocalAppState provides app) {
         Box(
@@ -176,7 +221,7 @@ private fun MainUi() {
                     awaitPointerEventScope {
                         while (true) {
                             awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
-                            app.lastTouch = android.os.SystemClock.uptimeMillis()
+                            app.lastTouch.set(android.os.SystemClock.uptimeMillis())
                         }
                     }
                 },
@@ -287,8 +332,8 @@ private fun MiniPlayer(song: Song, playing: Boolean, onOpen: () -> Unit) {
                 Text(song.title, color = Dot.White, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(song.artist, color = Dot.Muted, style = SansSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            IconBtn(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.ContextClick); engine.toggle() }, size = 28.dp)
-            IconBtn(Icons.Rounded.SkipNext, engine::next)
+            IconBtn(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.ContextClick); engine.toggle() }, size = 28.dp, description = if (playing) "Pause" else "Play")
+            IconBtn(Icons.Rounded.SkipNext, engine::next, description = "Next")
         }
         MiniProgress()
     }
@@ -315,12 +360,18 @@ private fun BedsideWhenCharging(app: AppState) {
         onStopOrDispose { context.unregisterReceiver(receiver) }
     }
 
-    LaunchedEffect(charging, enabled, app.lastTouch, app.bedside, app.party) {
+    LaunchedEffect(charging, enabled, app.bedside, app.party) {
         if (!charging && autoOpened) { app.bedside = false; autoOpened = false }
         if (charging && enabled && !app.bedside && !app.party) {
-            delay(60_000)
-            app.bedside = true
-            autoOpened = true
+            while (true) {
+                val idleMs = android.os.SystemClock.uptimeMillis() - app.lastTouch.get()
+                if (idleMs >= 60_000) {
+                    app.bedside = true
+                    autoOpened = true
+                    break
+                }
+                delay((60_000 - idleMs).coerceAtLeast(1_000))
+            }
         }
     }
 }

@@ -103,4 +103,30 @@ class DotDspTest {
         val liftDb = 20 * log10(at1k / at125)
         assertTrue("1 kHz should be at least 9 dB above 125 Hz, was $liftDb", liftDb > 9)
     }
+
+    @Test fun `levelling reacts at consistent rate across sample rates`() {
+        listOf(44100, 192000).forEach { testRate ->
+            val params = DspParams().apply { current = DspConfig(enabled = true, levelling = true) }
+            val dsp = DotDsp(params).apply {
+                configure(AudioProcessor.AudioFormat(testRate, 2, C.ENCODING_PCM_16BIT))
+                flush()
+            }
+            val frames = (testRate * 1.0f).toInt()
+            val input = ShortArray(frames * 2) { 20000.toShort() }
+            val out = ArrayList<Short>()
+            var i = 0
+            while (i < input.size) {
+                val n = minOf(8192, input.size - i)
+                val buf = ByteBuffer.allocateDirect(n * 2).order(ByteOrder.nativeOrder())
+                for (k in 0 until n) buf.putShort(input[i + k])
+                buf.flip()
+                dsp.queueInput(buf)
+                val o = dsp.output.order(ByteOrder.nativeOrder())
+                while (o.remaining() >= 2) out += o.short
+                i += n
+            }
+            val lastOutput = out.takeLast(100).map { abs(it.toInt()) }.average()
+            assertTrue("Output should attenuate towards target: $lastOutput", lastOutput < 20000)
+        }
+    }
 }

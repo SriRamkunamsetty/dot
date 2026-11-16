@@ -52,4 +52,36 @@ class LyricsParserTest {
     @Test fun `plain lyrics have no current line`() {
         assertEquals(-1, LyricsParser.parse("just words")!!.lineAt(5_000))
     }
+
+    @Test fun `strips BOM prefix character from first line`() {
+        val l = LyricsParser.parse("\uFEFF[00:01.00]hello")!!
+        assertTrue(l.synced)
+        assertEquals("hello", l.lines.single().text)
+    }
+
+    @Test fun `decodes UTF-8 with BOM`() {
+        val bom = byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte())
+        val text = "[00:01.00]test UTF-8".toByteArray(Charsets.UTF_8)
+        val decoded = LyricsParser.decodeLrc(bom + text)
+        assertEquals("[00:01.00]test UTF-8", decoded)
+    }
+
+    @Test fun `decodes UTF-16LE and UTF-16BE with BOM`() {
+        val leBom = byteArrayOf(0xFF.toByte(), 0xFE.toByte())
+        val leText = "[00:01.00]test 16LE".toByteArray(Charsets.UTF_16LE)
+        assertEquals("[00:01.00]test 16LE", LyricsParser.decodeLrc(leBom + leText))
+
+        val beBom = byteArrayOf(0xFE.toByte(), 0xFF.toByte())
+        val beText = "[00:01.00]test 16BE".toByteArray(Charsets.UTF_16BE)
+        assertEquals("[00:01.00]test 16BE", LyricsParser.decodeLrc(beBom + beText))
+    }
+
+    @Test fun `readLimitedBytes rejects oversized inputs`() {
+        val oversized = java.io.ByteArrayInputStream(ByteArray(512 * 1024 + 10))
+        assertNull(LyricsParser.readLimitedBytes(oversized, limit = 512 * 1024))
+
+        val withinLimit = java.io.ByteArrayInputStream("valid lyrics".toByteArray())
+        val read = LyricsParser.readLimitedBytes(withinLimit, limit = 512 * 1024)
+        assertEquals("valid lyrics", read?.let { String(it) })
+    }
 }
