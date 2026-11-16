@@ -58,6 +58,7 @@ class DotService : MediaSessionService() {
             return session.isMediaNotificationController(controller) ||
                 session.isAutoCompanionController(controller) ||
                 controller.packageName == currentPackageName ||
+                controller.packageName == "com.android.bluetooth" ||
                 controller.isTrusted
         }
     }
