@@ -67,15 +67,13 @@ import kotlin.math.roundToInt
  * a live preview of the song that's playing, so you pick by looking, not by reading.
  */
 @Composable
-fun VisualsSheet(song: Song, playing: Boolean, viz: VizState? = null, onDismiss: () -> Unit) {
+fun VisualsSheet(song: Song, playing: Boolean, viz: VizState, onDismiss: () -> Unit) {
     val dot = DotApp.instance
     val s = dot.settings
     val haptic = LocalHapticFeedback.current
     val artStyle by s.artStyle.flow.collectAsStateWithLifecycle()
     val stripStyle by s.stripStyle.flow.collectAsStateWithLifecycle()
     val vizOn by s.visualizer.flow.collectAsStateWithLifecycle()
-    val activeViz = viz ?: rememberVizState(dot.engine.spectrum, playing)
-    val viz = activeViz
     val app = LocalAppState.current
 
     fun pick(action: () -> Unit) {

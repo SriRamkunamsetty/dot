@@ -258,7 +258,7 @@ fun NowPlayingScreen(onClose: () -> Unit) {
     }
 
     if (sleepSheet) SleepSheet(onDismiss = { sleepSheet = false })
-    if (visualsSheet) VisualsSheet(song, state.playing, viz = viz, onDismiss = { visualsSheet = false })
+    if (visualsSheet && viz != null) VisualsSheet(song, state.playing, viz = viz, onDismiss = { visualsSheet = false })
 }
 
 @Composable
