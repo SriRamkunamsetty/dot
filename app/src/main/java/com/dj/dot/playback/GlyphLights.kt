@@ -44,6 +44,8 @@ class GlyphLights(
     private var loop: Job? = null
     private var listening = false
     private val last = IntArray(LEDS) { -1 }
+    private val previewBuffers = arrayOf(FloatArray(LEDS), FloatArray(LEDS))
+    private var previewIdx = 0
 
     /** What the strip is showing right now, 0..1 per LED from top to bottom, for the on-screen mirror. */
     @Volatile var preview: FloatArray = FloatArray(LEDS)
@@ -103,6 +105,7 @@ class GlyphLights(
         var level = 0f
         var pulse = 0f
         var lastAudible = System.nanoTime() - LATENCY_NS
+        val values = IntArray(LEDS)
         while (isActive) {
             val audible = System.nanoTime() - LATENCY_NS
             val beat = if (settings.glyphBeatFlash.value) spectrum.beatBetween(lastAudible, audible) else 0f
@@ -111,7 +114,6 @@ class GlyphLights(
             val gain = settings.glyphSensitivity.value / 100f
             val brightness = settings.glyphBrightness.value / 100f
 
-            val values = IntArray(LEDS)
             when (mode) {
                 GlyphMode.Meter -> {
                     // Weight the low bands: that's where the groove is.
@@ -133,10 +135,13 @@ class GlyphLights(
                         values[i] = (max(fill * 0.7f, pulse * 0.35f) * MAX).roundToInt()
                     }
                 }
-                GlyphMode.Off -> Unit
+                GlyphMode.Off -> values.fill(0)
             }
             for (i in values.indices) values[i] = (values[i] * brightness).roundToInt()
-            preview = FloatArray(LEDS) { values[it] / MAX.toFloat() }
+            previewIdx = 1 - previewIdx
+            val pBuf = previewBuffers[previewIdx]
+            for (i in 0 until LEDS) pBuf[i] = values[i] / MAX.toFloat()
+            preview = pBuf
             push(values)
             delay(FRAME_MS)
         }

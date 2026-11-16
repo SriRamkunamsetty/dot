@@ -207,14 +207,18 @@ private fun KaraokeText(text: String, showFill: Boolean, progress: () -> Float) 
                     val p = progress()
                     if (p <= 0f) return@drawWithContent
                     if (p >= 1f) { drawContent(); return@drawWithContent }
-                    val widths = FloatArray(l.lineCount) { l.getLineRight(it) - l.getLineLeft(it) }
-                    var remaining = p * widths.sum()
+                    var totalWidth = 0f
+                    for (i in 0 until l.lineCount) {
+                        totalWidth += l.getLineRight(i) - l.getLineLeft(i)
+                    }
+                    var remaining = p * totalWidth
                     for (i in 0 until l.lineCount) {
                         if (remaining <= 0f) break
                         val left = l.getLineLeft(i)
-                        val fill = min(widths[i], remaining)
+                        val lineW = l.getLineRight(i) - left
+                        val fill = min(lineW, remaining)
                         clipRect(left, l.getLineTop(i), left + fill, l.getLineBottom(i)) { this@drawWithContent.drawContent() }
-                        remaining -= widths[i]
+                        remaining -= lineW
                     }
                 },
             )
