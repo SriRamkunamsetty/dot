@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import java.util.concurrent.atomic.AtomicLong
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -85,12 +86,12 @@ sealed interface Screen {
 /** A song menu opened from a list; [playlistId]/[index] allow "remove from playlist". */
 data class SongMenu(val song: Song, val playlistId: String? = null, val index: Int = -1)
 
-class AppState {
+class AppState(var onScreenPopped: ((Screen) -> Unit)? = null) {
     val stack = mutableStateListOf<Screen>(Screen.Home)
     var nowPlaying by mutableStateOf(false)
     var party by mutableStateOf(false)
     var bedside by mutableStateOf(false)
-    var lastTouch by mutableStateOf(0L)
+    val lastTouch = AtomicLong(android.os.SystemClock.uptimeMillis())
     var menu by mutableStateOf<SongMenu?>(null)
     var addToPlaylist by mutableStateOf<List<Song>?>(null)
 
@@ -100,7 +101,10 @@ class AppState {
     }
 
     fun pop() {
-        if (stack.size > 1) stack.removeAt(stack.lastIndex)
+        if (stack.size > 1) {
+            val popped = stack.removeAt(stack.lastIndex)
+            if (stack.none { it.key == popped.key }) onScreenPopped?.invoke(popped)
+        }
     }
 }
 
@@ -161,10 +165,10 @@ private fun PermissionScreen(onAllow: () -> Unit) {
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun MainUi() {
-    val app = remember { AppState() }
+    val holder = rememberSaveableStateHolder()
+    val app = remember { AppState(onScreenPopped = { holder.removeState(it.key) }) }
     val engine = DotApp.instance.engine
     val state by engine.state.collectAsStateWithLifecycle()
-    val holder = rememberSaveableStateHolder()
 
     CompositionLocalProvider(LocalAppState provides app) {
         Box(
@@ -176,7 +180,7 @@ private fun MainUi() {
                     awaitPointerEventScope {
                         while (true) {
                             awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
-                            app.lastTouch = android.os.SystemClock.uptimeMillis()
+                            app.lastTouch.set(android.os.SystemClock.uptimeMillis())
                         }
                     }
                 },
@@ -315,12 +319,18 @@ private fun BedsideWhenCharging(app: AppState) {
         onStopOrDispose { context.unregisterReceiver(receiver) }
     }
 
-    LaunchedEffect(charging, enabled, app.lastTouch, app.bedside, app.party) {
+    LaunchedEffect(charging, enabled, app.bedside, app.party) {
         if (!charging && autoOpened) { app.bedside = false; autoOpened = false }
         if (charging && enabled && !app.bedside && !app.party) {
-            delay(60_000)
-            app.bedside = true
-            autoOpened = true
+            while (true) {
+                val idleMs = android.os.SystemClock.uptimeMillis() - app.lastTouch.get()
+                if (idleMs >= 60_000) {
+                    app.bedside = true
+                    autoOpened = true
+                    break
+                }
+                delay((60_000 - idleMs).coerceAtLeast(1_000))
+            }
         }
     }
 }
