@@ -33,7 +33,9 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleStartEffect
 import com.dj.dot.data.Song
@@ -248,15 +250,29 @@ fun DotArtViz(song: Song, state: VizState, modifier: Modifier = Modifier, grid: 
         halftone = withContext(Dispatchers.Default) { buildHalftone(art?.asAndroidBitmap(), grid) }
     }
 
-    // The halftone is painted once per size into a bitmap; each frame only scales it and
-    // lights the ripple band, instead of redrawing thousands of dots.
-    val cache = remember(halftone) { arrayOfNulls<androidx.compose.ui.graphics.ImageBitmap>(1) }
-    Canvas(modifier.graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }) {
+    var targetSize by remember { mutableStateOf(IntSize.Zero) }
+    var halftoneImage by remember(halftone) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+
+    LaunchedEffect(halftone, targetSize) {
+        val h = halftone ?: return@LaunchedEffect
+        val w = targetSize.width
+        val hgt = targetSize.height
+        if (w <= 0 || hgt <= 0) return@LaunchedEffect
+        if (halftoneImage?.width == w && halftoneImage?.height == hgt) return@LaunchedEffect
+        val bmp = withContext(Dispatchers.Default) {
+            paintHalftone(h, w, hgt)
+        }
+        halftoneImage = bmp
+    }
+
+    Canvas(
+        modifier
+            .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
+            .onSizeChanged { targetSize = it }
+    ) {
         state.frame
         val h = halftone ?: return@Canvas
-        val w = size.width.toInt().coerceAtLeast(1)
-        val hgt = size.height.toInt().coerceAtLeast(1)
-        val image = cache[0]?.takeIf { it.width == w && it.height == hgt } ?: paintHalftone(h, w, hgt).also { cache[0] = it }
+        val image = halftoneImage ?: return@Canvas
         val swell = 1f + 0.06f * state.pulse
         val center = Offset(size.width / 2, size.height / 2)
         val maxDist = min(size.width, size.height) * 0.72f

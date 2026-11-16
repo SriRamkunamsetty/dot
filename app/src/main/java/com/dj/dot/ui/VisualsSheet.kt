@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -51,6 +52,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -99,10 +101,10 @@ fun VisualsSheet(song: Song, playing: Boolean, onDismiss: () -> Unit) {
 
             SectionHeader("Modes", "Full-screen ways to listen")
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Tile("Party mode", false, Modifier.weight(1f).aspectRatio(1.35f), { pick { onDismiss(); app.party = true } }) {
+                Tile("Party mode", false, Modifier.weight(1f).aspectRatio(1.35f), { pick { onDismiss(); app.party = true } }, role = Role.Button) {
                     StripVisualizer(viz, StripStyle.Mirror, Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 22.dp), showReadout = false)
                 }
-                Tile("Bedside clock", false, Modifier.weight(1f).aspectRatio(1.35f), { pick { onDismiss(); app.bedside = true } }) {
+                Tile("Bedside clock", false, Modifier.weight(1f).aspectRatio(1.35f), { pick { onDismiss(); app.bedside = true } }, role = Role.Button) {
                     val now = remember { java.util.Date() }
                     DotTitle(android.text.format.DateFormat.format("h:mm", now).toString(), size = 30.sp)
                 }
@@ -216,17 +218,32 @@ private fun ModeArt(mode: GlyphMode) {
 
 /** A selectable preview card; selected gets a white outline and a red dot. */
 @Composable
-private fun Tile(label: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit, content: @Composable BoxScope.() -> Unit) {
+private fun Tile(
+    label: String,
+    selected: Boolean,
+    modifier: Modifier,
+    onClick: () -> Unit,
+    role: Role = Role.RadioButton,
+    content: @Composable BoxScope.() -> Unit,
+) {
     val ring by animateFloatAsState(if (selected) 1f else 0f, tween(180), label = "ring")
-    Column(modifier) {
+    val clickModifier = if (role == Role.RadioButton) {
+        Modifier.selectable(selected = selected, onClick = onClick, role = Role.RadioButton)
+    } else {
+        Modifier.clickable(onClick = onClick, role = role, onClickLabel = label)
+    }
+    Column(
+        modifier
+            .clip(RoundedCornerShape(18.dp))
+            .then(clickModifier),
+    ) {
         Box(
             Modifier
                 .weight(1f)
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(18.dp))
                 .background(Dot.Surface2)
-                .border(2.dp, lerp(Color.Transparent, Dot.White, ring), RoundedCornerShape(18.dp))
-                .clickable(onClick = onClick),
+                .border(2.dp, lerp(Color.Transparent, Dot.White, ring), RoundedCornerShape(18.dp)),
             contentAlignment = Alignment.Center,
         ) {
             content()
