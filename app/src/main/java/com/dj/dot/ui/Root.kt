@@ -102,7 +102,7 @@ class AppState(var onScreenPopped: ((Screen) -> Unit)? = null) {
     fun pop() {
         if (stack.size > 1) {
             val popped = stack.removeAt(stack.lastIndex)
-            onScreenPopped?.invoke(popped)
+            if (stack.none { it.key == popped.key }) onScreenPopped?.invoke(popped)
         }
     }
 }
