@@ -124,10 +124,11 @@ fun NowPlayingScreen(onClose: () -> Unit) {
             .background(Dot.Black)
             .dotGlow(if (wide) Offset(0.25f, 0.5f) else Offset(0.5f, 0.3f)) { glow }
             .pointerInput(Unit) {
+                val threshold = 80.dp.toPx()
                 detectVerticalDragGestures(
                     // Down closes the player, up opens the queue.
                     onDragEnd = {
-                        if (pullDown > 220f) onClose() else if (pullDown < -220f) panel = Panel.Queue
+                        if (pullDown > threshold) onClose() else if (pullDown < -threshold) panel = Panel.Queue
                         pullDown = 0f
                     },
                     onDragCancel = { pullDown = 0f },
@@ -280,9 +281,10 @@ private fun ArtPanel(song: com.dj.dot.data.Song, playing: Boolean, showViz: Bool
                 // On the record, sideways drags scratch instead of skipping.
                 .pointerInput(artStyle) {
                     if (artStyle == ArtStyle.Vinyl) return@pointerInput
+                    val threshold = 48.dp.toPx()
                     detectHorizontalDragGestures(
                         onDragEnd = {
-                            if (dragX < -120f) engine.next() else if (dragX > 120f) engine.previous()
+                            if (dragX < -threshold) engine.next() else if (dragX > threshold) engine.previous()
                             dragX = 0f
                         },
                         onDragCancel = { dragX = 0f },
