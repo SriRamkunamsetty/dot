@@ -10,6 +10,9 @@ import androidx.media3.extractor.metadata.id3.BinaryFrame
 import androidx.media3.extractor.metadata.id3.TextInformationFrame
 import androidx.media3.extractor.metadata.vorbis.VorbisComment
 import com.dj.dot.data.Song
+import java.io.InputStream
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
 
 data class LyricLine(val timeMs: Long, val text: String)
 
@@ -29,12 +32,14 @@ data class Lyrics(val synced: Boolean, val lines: List<LyricLine>) {
 }
 
 object LyricsParser {
+    const val MAX_LRC_BYTES = 512 * 1024
     private val timeTag = Regex("""\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?]""")
 
     fun parse(raw: String): Lyrics? {
+        val clean = raw.removePrefix("\uFEFF")
         val synced = ArrayList<LyricLine>()
         val plain = ArrayList<String>()
-        raw.lineSequence().forEach { line ->
+        clean.lineSequence().forEach { line ->
             val tags = timeTag.findAll(line).toList()
             if (tags.isNotEmpty()) {
                 val text = line.substring(tags.last().range.last + 1).trim()
@@ -56,6 +61,46 @@ object LyricsParser {
             synced.isNotEmpty() -> Lyrics(true, synced.sortedBy { it.timeMs })
             plain.any { it.isNotBlank() } -> Lyrics(false, plain.dropWhile { it.isBlank() }.map { LyricLine(0, it) })
             else -> null
+        }
+    }
+
+    internal fun readLimitedBytes(input: InputStream, limit: Int = MAX_LRC_BYTES): ByteArray? {
+        val buffer = ByteArray(limit + 1)
+        var totalRead = 0
+        while (totalRead < buffer.size) {
+            val read = input.read(buffer, totalRead, buffer.size - totalRead)
+            if (read == -1) break
+            totalRead += read
+        }
+        if (totalRead > limit) return null
+        return buffer.copyOf(totalRead)
+    }
+
+    internal fun decodeLrc(bytes: ByteArray): String? {
+        if (bytes.size >= 3 && bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte()) {
+            return String(bytes, 3, bytes.size - 3, Charsets.UTF_8)
+        }
+        if (bytes.size >= 2 && bytes[0] == 0xFE.toByte() && bytes[1] == 0xFF.toByte()) {
+            return String(bytes, 2, bytes.size - 2, Charsets.UTF_16BE)
+        }
+        if (bytes.size >= 2 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xFE.toByte()) {
+            return String(bytes, 2, bytes.size - 2, Charsets.UTF_16LE)
+        }
+        if (bytes.size >= 4) {
+            if (bytes[0] == 0x5B.toByte() && bytes[1] == 0.toByte()) {
+                return runCatching { String(bytes, Charsets.UTF_16LE) }.getOrNull()
+            }
+            if (bytes[0] == 0.toByte() && bytes[1] == 0x5B.toByte()) {
+                return runCatching { String(bytes, Charsets.UTF_16BE) }.getOrNull()
+            }
+        }
+        return runCatching {
+            val decoder = Charsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+            decoder.decode(ByteBuffer.wrap(bytes)).toString()
+        }.getOrElse {
+            String(bytes, Charsets.ISO_8859_1)
         }
     }
 
@@ -92,7 +137,8 @@ object LyricsParser {
             ?: return null
         return runCatching {
             resolver.openInputStream(DocumentsContract.buildDocumentUriUsingTree(tree, docId))?.use { input ->
-                parse(input.bufferedReader().readText())
+                val bytes = readLimitedBytes(input) ?: return@use null
+                decodeLrc(bytes)?.let(::parse)
             }
         }.getOrNull()
     }

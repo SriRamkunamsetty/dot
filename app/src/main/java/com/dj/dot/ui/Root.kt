@@ -1,9 +1,14 @@
 package com.dj.dot.ui
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import java.util.concurrent.atomic.AtomicLong
+import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -49,7 +54,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -63,6 +72,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dj.dot.DotApp
@@ -85,12 +95,12 @@ sealed interface Screen {
 /** A song menu opened from a list; [playlistId]/[index] allow "remove from playlist". */
 data class SongMenu(val song: Song, val playlistId: String? = null, val index: Int = -1)
 
-class AppState {
+class AppState(var onScreenPopped: ((Screen) -> Unit)? = null) {
     val stack = mutableStateListOf<Screen>(Screen.Home)
     var nowPlaying by mutableStateOf(false)
     var party by mutableStateOf(false)
     var bedside by mutableStateOf(false)
-    var lastTouch by mutableStateOf(0L)
+    val lastTouch = AtomicLong(android.os.SystemClock.uptimeMillis())
     var menu by mutableStateOf<SongMenu?>(null)
     var addToPlaylist by mutableStateOf<List<Song>?>(null)
 
@@ -100,9 +110,47 @@ class AppState {
     }
 
     fun pop() {
-        if (stack.size > 1) stack.removeAt(stack.lastIndex)
+        if (stack.size > 1) {
+            val popped = stack.removeAt(stack.lastIndex)
+            if (stack.none { it.key == popped.key }) onScreenPopped?.invoke(popped)
+        }
     }
 }
+
+private fun screenFromKey(key: String): Screen? = when {
+    key == "home" -> Screen.Home
+    key == "search" -> Screen.Search
+    key == "settings" -> Screen.Settings
+    key == "eq" -> Screen.Equalizer
+    key == "wrapped" -> Screen.Wrapped
+    key.startsWith("album/") -> key.removePrefix("album/").toLongOrNull()?.let { Screen.Album(it) }
+    key.startsWith("artist/") -> Screen.Artist(key.removePrefix("artist/"))
+    key.startsWith("folder/") -> Screen.Folder(key.removePrefix("folder/"))
+    key.startsWith("playlist/") -> Screen.Playlist(key.removePrefix("playlist/"))
+    else -> null
+}
+
+val AppStateSaver: Saver<AppState, Any> = listSaver(
+    save = { app ->
+        listOf(
+            app.stack.map { it.key },
+            app.nowPlaying,
+        )
+    },
+    restore = { value ->
+        val app = AppState()
+        val keys = (value.getOrNull(0) as? List<*>)?.filterIsInstance<String>()
+        if (!keys.isNullOrEmpty()) {
+            val restored = keys.mapNotNull(::screenFromKey)
+            if (restored.isNotEmpty()) {
+                app.stack.clear()
+                app.stack.addAll(restored)
+            }
+        }
+        app.nowPlaying = (value.getOrNull(1) as? Boolean) ?: false
+        app
+    },
+)
 
 val LocalAppState = staticCompositionLocalOf<AppState> { error("AppState not provided") }
 
@@ -118,30 +166,65 @@ private fun audioPermission() =
 private fun hasAudio(context: Context) =
     ContextCompat.checkSelfPermission(context, audioPermission()) == PackageManager.PERMISSION_GRANTED
 
+private fun openAppSettings(context: Context) {
+    runCatching {
+        context.startActivity(
+            Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:${context.packageName}"),
+            ),
+        )
+    }
+}
+
 @Composable
 fun DotRoot() {
     val context = LocalContext.current
+    val activity = context as? Activity
     var granted by remember { mutableStateOf(hasAudio(context)) }
+    var askedOnce by rememberSaveable { mutableStateOf(false) }
+
+    androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
+        granted = hasAudio(context)
+        onPauseOrDispose { }
+    }
+
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        askedOnce = true
         granted = hasAudio(context)
     }
     LaunchedEffect(granted) { if (granted) DotApp.instance.library.start() }
 
+    val permanentlyDenied = !granted && askedOnce && activity != null &&
+        !ActivityCompat.shouldShowRequestPermissionRationale(activity, audioPermission())
+
     if (!granted) {
-        PermissionScreen {
-            val perms = buildList {
-                add(audioPermission())
-                if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
-            }
-            launcher.launch(perms.toTypedArray())
-        }
+        PermissionScreen(
+            buttonLabel = if (permanentlyDenied) "Open App Settings" else "Allow music access",
+            subtitle = if (permanentlyDenied) "Music access is permanently denied. Tap to open Settings" else null,
+            onAction = {
+                if (permanentlyDenied) {
+                    openAppSettings(context)
+                } else {
+                    val perms = buildList {
+                        add(audioPermission())
+                        if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                    launcher.launch(perms.toTypedArray())
+                }
+            },
+        )
     } else {
         MainUi()
     }
 }
 
 @Composable
-private fun PermissionScreen(onAllow: () -> Unit) {
+private fun PermissionScreen(
+    buttonLabel: String = "Allow music access",
+    subtitle: String? = null,
+    onAction: () -> Unit,
+) {
     Column(
         Modifier.fillMaxSize().background(Dot.Black).padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -152,19 +235,21 @@ private fun PermissionScreen(onAllow: () -> Unit) {
             Box(Modifier.padding(start = 6.dp, bottom = 22.dp).size(16.dp).clip(CircleShape).background(Dot.Red))
         }
         Spacer(Modifier.height(12.dp))
-        Label("Your music. Offline. Nothing else.", align = TextAlign.Center)
+        Label(subtitle ?: "Your music. Offline. Nothing else.", align = TextAlign.Center)
         Spacer(Modifier.height(48.dp))
-        Pill("Allow music access", onAllow, accent = true)
+        Pill(buttonLabel, onAction, accent = true)
     }
 }
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun MainUi() {
-    val app = remember { AppState() }
+    val holder = rememberSaveableStateHolder()
+    val app = rememberSaveable(saver = AppStateSaver) { AppState() }
+    // Restored states are built without the callback, so attach it here for both cases.
+    SideEffect { app.onScreenPopped = { holder.removeState(it.key) } }
     val engine = DotApp.instance.engine
     val state by engine.state.collectAsStateWithLifecycle()
-    val holder = rememberSaveableStateHolder()
 
     CompositionLocalProvider(LocalAppState provides app) {
         Box(
@@ -176,7 +261,7 @@ private fun MainUi() {
                     awaitPointerEventScope {
                         while (true) {
                             awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
-                            app.lastTouch = android.os.SystemClock.uptimeMillis()
+                            app.lastTouch.set(android.os.SystemClock.uptimeMillis())
                         }
                     }
                 },
@@ -287,8 +372,8 @@ private fun MiniPlayer(song: Song, playing: Boolean, onOpen: () -> Unit) {
                 Text(song.title, color = Dot.White, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(song.artist, color = Dot.Muted, style = SansSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            IconBtn(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.ContextClick); engine.toggle() }, size = 28.dp)
-            IconBtn(Icons.Rounded.SkipNext, engine::next)
+            IconBtn(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.ContextClick); engine.toggle() }, size = 28.dp, description = if (playing) "Pause" else "Play")
+            IconBtn(Icons.Rounded.SkipNext, engine::next, description = "Next")
         }
         MiniProgress()
     }
@@ -315,12 +400,18 @@ private fun BedsideWhenCharging(app: AppState) {
         onStopOrDispose { context.unregisterReceiver(receiver) }
     }
 
-    LaunchedEffect(charging, enabled, app.lastTouch, app.bedside, app.party) {
+    LaunchedEffect(charging, enabled, app.bedside, app.party) {
         if (!charging && autoOpened) { app.bedside = false; autoOpened = false }
         if (charging && enabled && !app.bedside && !app.party) {
-            delay(60_000)
-            app.bedside = true
-            autoOpened = true
+            while (true) {
+                val idleMs = android.os.SystemClock.uptimeMillis() - app.lastTouch.get()
+                if (idleMs >= 60_000) {
+                    app.bedside = true
+                    autoOpened = true
+                    break
+                }
+                delay((60_000 - idleMs).coerceAtLeast(1_000))
+            }
         }
     }
 }

@@ -10,12 +10,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -27,10 +29,13 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import com.dj.dot.DotApp
 import com.dj.dot.data.Song
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -55,6 +60,24 @@ fun VinylViz(song: Song, playing: Boolean, modifier: Modifier = Modifier, intera
     var velocity by remember { mutableFloatStateOf(0f) }
     var scratching by remember { mutableStateOf(false) }
     val grooves = remember { arrayOfNulls<ImageBitmap>(1) }
+
+    val density = LocalDensity.current
+    val ringGap = with(density) { 3.5.dp.toPx() }
+    val dotGap = with(density) { 5.dp.toPx() }
+    val strokeWidth = with(density) { 1.dp.toPx() }
+    val grooveTint = remember { ColorFilter.tint(Color(0xFF3A3A3A)) }
+
+    var discSize by remember { mutableIntStateOf(0) }
+    var grooveBitmap by remember { mutableStateOf<ImageBitmap?>(grooves[0]) }
+
+    LaunchedEffect(discSize, ringGap, dotGap) {
+        if (discSize <= 0) return@LaunchedEffect
+        if (grooveBitmap?.width == discSize) return@LaunchedEffect
+        val bmp = withContext(Dispatchers.Default) {
+            paintGrooves(discSize, ringGap, dotGap).also { grooves[0] = it }
+        }
+        grooveBitmap = bmp
+    }
 
     LaunchedEffect(playing, scratching) {
         if (scratching) return@LaunchedEffect
@@ -111,26 +134,30 @@ fun VinylViz(song: Song, playing: Boolean, modifier: Modifier = Modifier, intera
         ),
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(Modifier.fillMaxSize()) {
+        Canvas(Modifier.fillMaxSize().drawWithCache {
             val r = min(size.width, size.height) / 2 * 0.96f
             val c = Offset(size.width / 2, size.height / 2)
             val px = (r * 2).toInt().coerceAtLeast(1)
-            val image = grooves[0]?.takeIf { it.width == px } ?: paintGrooves(px, 3.5.dp.toPx(), 5.dp.toPx()).also { grooves[0] = it }
+            if (discSize != px) discSize = px
 
-            drawCircle(Color(0xFF070707), r, c)
-            rotate(angle, c) { drawImage(image, Offset(c.x - px / 2f, c.y - px / 2f), colorFilter = ColorFilter.tint(Color(0xFF3A3A3A))) }
-            // Light from a fixed window: two soft bands that stay put while the grooves turn.
-            drawCircle(
-                Brush.sweepGradient(
-                    0f to Color.Transparent, 0.08f to Color.White.copy(alpha = 0.09f), 0.16f to Color.Transparent,
-                    0.5f to Color.Transparent, 0.58f to Color.White.copy(alpha = 0.06f), 0.66f to Color.Transparent,
-                    1f to Color.Transparent,
-                    center = c,
-                ),
-                r, c,
+            val gradient = Brush.sweepGradient(
+                0f to Color.Transparent, 0.08f to Color.White.copy(alpha = 0.09f), 0.16f to Color.Transparent,
+                0.5f to Color.Transparent, 0.58f to Color.White.copy(alpha = 0.06f), 0.66f to Color.Transparent,
+                1f to Color.Transparent,
+                center = c,
             )
-            drawCircle(Dot.Line, r, c, style = Stroke(1.dp.toPx()))
-        }
+            onDrawBehind {
+                drawCircle(Color(0xFF070707), r, c)
+                val img = grooveBitmap?.takeIf { it.width == px }
+                if (img != null) {
+                    rotate(angle, c) {
+                        drawImage(img, Offset(c.x - px / 2f, c.y - px / 2f), colorFilter = grooveTint)
+                    }
+                }
+                drawCircle(gradient, r, c)
+                drawCircle(Dot.Line, r, c, style = Stroke(strokeWidth))
+            }
+        }) { }
         Art(song, Modifier.fillMaxSize(0.38f).graphicsLayer { rotationZ = angle }, px = 420, shape = CircleShape)
         Canvas(Modifier.fillMaxSize()) {
             val r = min(size.width, size.height) / 2 * 0.96f

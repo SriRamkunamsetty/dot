@@ -33,6 +33,7 @@ fun ShakeToShuffle() {
         val linear = sensors.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
         val sensor = linear ?: sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         val gravity = FloatArray(3)
+        val v = FloatArray(3)
         var lastSign = 0
         var swings = 0
         var windowStart = 0L
@@ -40,7 +41,6 @@ fun ShakeToShuffle() {
         var cooldownUntil = 0L
         val listener = object : SensorEventListener {
             override fun onSensorChanged(e: SensorEvent) {
-                val v = FloatArray(3)
                 for (i in 0..2) {
                     if (linear == null) {
                         gravity[i] = gravity[i] * 0.8f + e.values[i] * 0.2f
@@ -49,8 +49,10 @@ fun ShakeToShuffle() {
                         v[i] = e.values[i]
                     }
                 }
-                val axis = (0..2).maxBy { abs(v[it]) }
-                val a = v[axis]
+                val a0 = abs(v[0])
+                val a1 = abs(v[1])
+                val a2 = abs(v[2])
+                val a = if (a0 >= a1 && a0 >= a2) v[0] else if (a1 >= a2) v[1] else v[2]
                 val now = SystemClock.uptimeMillis()
                 if (abs(a) < SWING || now < cooldownUntil) return
                 if (now - windowStart > WINDOW_MS) {

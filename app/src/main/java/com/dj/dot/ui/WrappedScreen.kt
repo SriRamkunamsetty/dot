@@ -2,6 +2,7 @@ package com.dj.dot.ui
 
 import android.content.Intent
 import android.graphics.Bitmap
+import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
@@ -55,6 +56,7 @@ import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -137,16 +139,20 @@ fun WrappedScreen() {
     }
 
     fun share() = scope.launch {
-        val bitmap = shareLayer.toImageBitmap().asAndroidBitmap()
-        val uri = withContext(Dispatchers.IO) {
-            val dir = File(context.cacheDir, "shared").apply { mkdirs() }
-            val file = File(dir, "dot-wrapped.png")
-            file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-            FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+        runCatching {
+            val bitmap = shareLayer.toImageBitmap().asAndroidBitmap()
+            val uri = withContext(Dispatchers.IO) {
+                val dir = File(context.cacheDir, "shared").apply { mkdirs() }
+                val file = File(dir, "dot-wrapped.png")
+                file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+            }
+            val send = Intent(Intent.ACTION_SEND).setType("image/png").putExtra(Intent.EXTRA_STREAM, uri)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            context.startActivity(Intent.createChooser(send, "Share your Dot Wrapped"))
+        }.onFailure {
+            Toast.makeText(context, "Could not share Wrapped", Toast.LENGTH_SHORT).show()
         }
-        val send = Intent(Intent.ACTION_SEND).setType("image/png").putExtra(Intent.EXTRA_STREAM, uri)
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        context.startActivity(Intent.createChooser(send, "Share your Dot Wrapped"))
     }
 
     var showList by rememberSaveable { mutableStateOf(false) }
@@ -160,7 +166,7 @@ private fun WrappedList(stats: WrappedStats, shareLayer: GraphicsLayer, onShare:
     LazyColumn(Modifier.fillMaxSize().statusBarsPadding(), contentPadding = PaddingValues(bottom = 32.dp)) {
         item {
             TopBar("Wrapped", onBack) {
-                if (stats.totalMinutes > 0) IconBtn(Icons.Rounded.Share, onShare, size = 22.dp)
+                if (stats.totalMinutes > 0) IconBtn(Icons.Rounded.Share, onShare, size = 22.dp, description = "Share wrapped")
             }
         }
         if (stats.totalMinutes < 1) {
@@ -189,7 +195,7 @@ private fun ShareableSummary(stats: WrappedStats, shareLayer: GraphicsLayer, mod
 @Composable
 private fun SummaryCard(stats: WrappedStats) {
     val (type, line) = listenerType(stats.hours)
-    val since = SimpleDateFormat("d MMM yyyy", Locale.getDefault()).format(Date(stats.since))
+    val since = SimpleDateFormat("d MMM yyyy", LocalLocale.current.platformLocale).format(Date(stats.since))
     Column(
         Modifier
             .fillMaxWidth()
@@ -335,7 +341,7 @@ private fun StoryCard(story: Story, stats: WrappedStats, shareLayer: GraphicsLay
     ) {
         when (story) {
             Story.Minutes -> {
-                val since = SimpleDateFormat("d MMM", Locale.getDefault()).format(Date(stats.since))
+                val since = SimpleDateFormat("d MMM", LocalLocale.current.platformLocale).format(Date(stats.since))
                 Label("Since $since you've played", color = Dot.White)
                 Spacer(Modifier.height(16.dp))
                 CountUp(stats.totalMinutes)

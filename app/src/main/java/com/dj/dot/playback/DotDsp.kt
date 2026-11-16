@@ -91,6 +91,7 @@ class DotDsp(private val params: DspParams) : BaseAudioProcessor() {
     // Levelling: slow RMS follower and a gain that drifts towards the target.
     private var rms = 0.01f
     private var levelGain = 1f
+    private var levelCoef = LEVEL_COEF
 
     // Limiter envelope
     private var envelope = 0f
@@ -111,6 +112,7 @@ class DotDsp(private val params: DspParams) : BaseAudioProcessor() {
         limiterRelease = exp(-1.0 / (0.12 * rate)).toFloat()
         gainStep = (1.0 - exp(-1.0 / (SMOOTH_SECONDS * rate))).toFloat()
         glideStep = (1.0 - exp(-GLIDE_BLOCK / (SMOOTH_SECONDS * rate))).toFloat()
+        levelCoef = LEVEL_COEF * (44100f / rate.coerceAtLeast(8000))
         built = null
         return inputAudioFormat
     }
@@ -205,9 +207,9 @@ class DotDsp(private val params: DspParams) : BaseAudioProcessor() {
 
             if (levelling) {
                 val p = (l * l + r * r) * 0.5f
-                rms += (p - rms) * LEVEL_COEF
+                rms += (p - rms) * levelCoef
                 val target = (TARGET_RMS / sqrt(max(rms, 1e-6f))).coerceIn(0.5f, 2f)
-                levelGain += (target - levelGain) * LEVEL_COEF
+                levelGain += (target - levelGain) * levelCoef
                 l *= levelGain
                 r *= levelGain
             }

@@ -87,7 +87,7 @@ class Settings(context: Context) {
     val artStyle = portableInt("art_style", 0)
     val glyphMode = portableInt("glyph_mode", 1)
     val shakeForRandom = portableBool("shake_random", true)
-    val playOnConnect = portableBool("play_on_connect", true)
+    val playOnConnect = portableBool("play_on_connect", false)
     val bedsideWhenCharging = portableBool("bedside_charging", true)
     val glyphBrightness = portableInt("glyph_brightness", 100)
     val glyphSensitivity = portableInt("glyph_sensitivity", 100)

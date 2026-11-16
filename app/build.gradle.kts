@@ -6,7 +6,6 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
@@ -19,7 +18,7 @@ fun signingValue(key: String, env: String): String? = keystoreProps.getProperty(
 
 android {
     namespace = "com.dj.dot"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.dj.dot"
@@ -94,7 +93,7 @@ kotlin { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }
 val glyphSdkCommit = "8ee807a9312a640b0d43051450924e3446bc1d78"
 val glyphSdkSha256 = "329393019db5f0f987c6245855d13fa273d06756c68829ca0f6ae686ba336da1"
 val glyphSdk = layout.projectDirectory.file("libs/glyph-matrix-sdk-2.0.aar")
-val fetchGlyphSdk by tasks.registering {
+val fetchGlyphSdk = tasks.register("fetchGlyphSdk") {
     val target = glyphSdk.asFile
     inputs.property("sha256", glyphSdkSha256)
     outputs.file(target)
@@ -117,14 +116,14 @@ val fetchGlyphSdk by tasks.registering {
 tasks.named("preBuild") { dependsOn(fetchGlyphSdk) }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2025.06.00")
+    val composeBom = platform("androidx.compose:compose-bom:2026.09.00")
     implementation(composeBom)
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
     implementation("androidx.activity:activity-compose:1.10.1")
-    implementation("androidx.core:core-ktx:1.16.0")
+    implementation("androidx.core:core-ktx:1.19.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.1")
     implementation("androidx.media3:media3-exoplayer:1.8.0")
     implementation("androidx.media3:media3-session:1.8.0")

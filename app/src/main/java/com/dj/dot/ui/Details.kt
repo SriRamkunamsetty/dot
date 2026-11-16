@@ -102,16 +102,17 @@ fun PlaylistScreen(id: String) {
             }
             val songs = remember(rows) { rows.map { it.second } }
             var renaming by remember { mutableStateOf(false) }
+            var deleting by remember { mutableStateOf(false) }
             var menu by remember { mutableStateOf(false) }
             SongListScreen(
                 playlist.name, countOf(songs.size, "song"), songs, cover = songs.firstOrNull(), playlistId = playlist.id,
                 playlistIndex = { rows[it].first },
                 actions = {
                     Box {
-                        IconBtn(Icons.Rounded.MoreVert, { menu = true })
+                        IconBtn(Icons.Rounded.MoreVert, { menu = true }, description = "More options")
                         DropdownMenu(menu, { menu = false }) {
                             DropdownMenuItem({ Text("Rename") }, { menu = false; renaming = true })
-                            DropdownMenuItem({ Text("Delete", color = Dot.Red) }, { menu = false; dot.store.delete(playlist.id); app.pop() })
+                            DropdownMenuItem({ Text("Delete", color = Dot.Red) }, { menu = false; deleting = true })
                         }
                     }
                 },
@@ -120,6 +121,17 @@ fun PlaylistScreen(id: String) {
                 dot.store.rename(playlist.id, it)
                 renaming = false
             }
+            if (deleting) ConfirmDialog(
+                title = "Delete playlist?",
+                message = "“${playlist.name}” will be deleted. The songs will stay in your library.",
+                confirmLabel = "Delete",
+                onDismiss = { deleting = false },
+                onConfirm = {
+                    deleting = false
+                    dot.store.delete(playlist.id)
+                    app.pop()
+                },
+            )
         }
     }
 }
@@ -151,6 +163,14 @@ private fun SongListScreen(
     val app = LocalAppState.current
     val state by dot.engine.state.collectAsStateWithLifecycle()
     val currentId = state.current?.id
+    val keys = remember(songs) {
+        val counts = HashMap<Long, Int>(songs.size)
+        songs.map { song ->
+            val count = counts.getOrDefault(song.id, 0)
+            counts[song.id] = count + 1
+            if (count == 0) "${song.id}" else "${song.id}#$count"
+        }
+    }
 
     LazyColumn(Modifier.fillMaxSize().statusBarsPadding(), contentPadding = PaddingValues(bottom = 16.dp)) {
         item { TopBar("", app::pop, actions) }
@@ -173,11 +193,12 @@ private fun SongListScreen(
             }
         }
         if (songs.isEmpty()) item { EmptyState(emptyTitle, emptyHint) }
-        itemsIndexed(songs, key = { i, s -> "$i-${s.id}" }) { i, s ->
+        itemsIndexed(songs, key = { i, _ -> keys.getOrElse(i) { "$i-${songs[i].id}" } }) { i, s ->
             SongRow(
                 s, s.id == currentId,
                 onClick = { dot.engine.playSongs(songs, i) },
                 onMore = { app.menu = SongMenu(s, playlistId, playlistIndex(i)) },
+                modifier = Modifier.animateItem(),
                 leading = if (trackNumbers) {
                     {
                         Box(Modifier.width(32.dp), contentAlignment = Alignment.CenterStart) {

@@ -167,3 +167,22 @@ fun NameDialog(title: String, initial: String, onDismiss: () -> Unit, onConfirm:
         dismissButton = { Pill("Cancel", onDismiss) },
     )
 }
+
+@Composable
+fun ConfirmDialog(
+    title: String,
+    message: String,
+    confirmLabel: String = "Delete",
+    accent: Boolean = true,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Dot.Surface2,
+        title = { DotTitle(title, size = 22.sp) },
+        text = { Text(message, color = Dot.Muted, fontSize = 14.sp) },
+        confirmButton = { Pill(confirmLabel, onConfirm, accent = accent) },
+        dismissButton = { Pill("Cancel", onDismiss) },
+    )
+}
