@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import android.text.format.DateFormat
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -19,10 +21,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import kotlin.math.PI
@@ -40,11 +44,21 @@ const val SLEEP_DIAL_MAX = 180
  */
 @Composable
 fun SleepDial(minutes: Int, onChange: (Int) -> Unit, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val callback by rememberUpdatedState(onChange)
     val current by rememberUpdatedState(minutes)
     var wound by remember { mutableFloatStateOf(minutes.toFloat()) }
     var lastAngle by remember { mutableStateOf<Float?>(null) }
+    var now by remember { mutableStateOf(LocalTime.now()) }
+    val is24Hour = DateFormat.is24HourFormat(context)
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(30_000)
+            now = LocalTime.now()
+        }
+    }
 
     fun set(value: Int) {
         val v = value.coerceIn(1, SLEEP_DIAL_MAX)
@@ -125,7 +139,8 @@ fun SleepDial(minutes: Int, onChange: (Int) -> Unit, modifier: Modifier = Modifi
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             DotTitle(if (minutes >= 60) "%d:%02d".format(minutes / 60, minutes % 60) else "$minutes", size = 52.sp)
             Label(if (minutes >= 60) "Hours" else "Minutes")
-            Label("Stops at " + LocalTime.now().plusMinutes(minutes.toLong()).format(DateTimeFormatter.ofPattern("h:mm a")), color = Dot.White)
+            val pattern = if (is24Hour) "HH:mm" else "h:mm a"
+            Label("Stops at " + now.plusMinutes(minutes.toLong()).format(DateTimeFormatter.ofPattern(pattern)), color = Dot.White)
         }
     }
 }

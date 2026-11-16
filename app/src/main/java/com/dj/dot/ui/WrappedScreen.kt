@@ -2,6 +2,7 @@ package com.dj.dot.ui
 
 import android.content.Intent
 import android.graphics.Bitmap
+import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
@@ -137,16 +138,20 @@ fun WrappedScreen() {
     }
 
     fun share() = scope.launch {
-        val bitmap = shareLayer.toImageBitmap().asAndroidBitmap()
-        val uri = withContext(Dispatchers.IO) {
-            val dir = File(context.cacheDir, "shared").apply { mkdirs() }
-            val file = File(dir, "dot-wrapped.png")
-            file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-            FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+        runCatching {
+            val bitmap = shareLayer.toImageBitmap().asAndroidBitmap()
+            val uri = withContext(Dispatchers.IO) {
+                val dir = File(context.cacheDir, "shared").apply { mkdirs() }
+                val file = File(dir, "dot-wrapped.png")
+                file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+            }
+            val send = Intent(Intent.ACTION_SEND).setType("image/png").putExtra(Intent.EXTRA_STREAM, uri)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            context.startActivity(Intent.createChooser(send, "Share your Dot Wrapped"))
+        }.onFailure {
+            Toast.makeText(context, "Could not share Wrapped", Toast.LENGTH_SHORT).show()
         }
-        val send = Intent(Intent.ACTION_SEND).setType("image/png").putExtra(Intent.EXTRA_STREAM, uri)
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        context.startActivity(Intent.createChooser(send, "Share your Dot Wrapped"))
     }
 
     var showList by rememberSaveable { mutableStateOf(false) }
