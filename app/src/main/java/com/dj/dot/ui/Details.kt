@@ -102,6 +102,7 @@ fun PlaylistScreen(id: String) {
             }
             val songs = remember(rows) { rows.map { it.second } }
             var renaming by remember { mutableStateOf(false) }
+            var deleting by remember { mutableStateOf(false) }
             var menu by remember { mutableStateOf(false) }
             SongListScreen(
                 playlist.name, countOf(songs.size, "song"), songs, cover = songs.firstOrNull(), playlistId = playlist.id,
@@ -111,7 +112,7 @@ fun PlaylistScreen(id: String) {
                         IconBtn(Icons.Rounded.MoreVert, { menu = true })
                         DropdownMenu(menu, { menu = false }) {
                             DropdownMenuItem({ Text("Rename") }, { menu = false; renaming = true })
-                            DropdownMenuItem({ Text("Delete", color = Dot.Red) }, { menu = false; dot.store.delete(playlist.id); app.pop() })
+                            DropdownMenuItem({ Text("Delete", color = Dot.Red) }, { menu = false; deleting = true })
                         }
                     }
                 },
@@ -120,6 +121,17 @@ fun PlaylistScreen(id: String) {
                 dot.store.rename(playlist.id, it)
                 renaming = false
             }
+            if (deleting) ConfirmDialog(
+                title = "Delete playlist?",
+                message = "“${playlist.name}” will be deleted. The songs will stay in your library.",
+                confirmLabel = "Delete",
+                onDismiss = { deleting = false },
+                onConfirm = {
+                    deleting = false
+                    dot.store.delete(playlist.id)
+                    app.pop()
+                },
+            )
         }
     }
 }
