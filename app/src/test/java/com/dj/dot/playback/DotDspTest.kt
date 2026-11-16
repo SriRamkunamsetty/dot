@@ -72,10 +72,10 @@ class DotDspTest {
         assertArrayEquals(input, run(processor(DspConfig(enabled = false)), input))
     }
 
-    @Test fun `reports inactive when disabled and not settling`() {
+    @Test fun `remains active when disabled so mid-song toggles apply immediately`() {
         val dsp = DotDsp(DspParams().apply { current = DspConfig(enabled = false) })
         dsp.configure(AudioProcessor.AudioFormat(rate, 2, C.ENCODING_PCM_16BIT))
-        assertTrue(!dsp.isActive)
+        assertTrue(dsp.isActive)
     }
 
     @Test fun `heavy boost never hard clips`() {

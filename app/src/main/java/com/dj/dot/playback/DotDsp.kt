@@ -97,8 +97,6 @@ class DotDsp(private val params: DspParams) : BaseAudioProcessor() {
     private var envelope = 0f
     private var limiterRelease = 0f
 
-    override fun isActive(): Boolean = super.isActive() && (params.current.enabled || built != null)
-
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
         // Surround and other formats pass through untouched instead of failing the track.
         if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT || inputAudioFormat.channelCount !in 1..2) {
