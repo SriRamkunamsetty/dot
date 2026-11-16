@@ -12,6 +12,7 @@ import android.media.audiofx.AudioEffect
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.core.content.ContextCompat
 import androidx.media3.common.AudioAttributes
@@ -70,6 +71,17 @@ private val HEADPHONE_TYPES = setOf(
     AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_WIRED_HEADSET,
     AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_BLE_HEADSET,
 )
+
+private val CAR_OR_SPEAKER_KEYWORDS = listOf(
+    "car", "auto", "vehicle", "carkit", "uconnect", "sync", "infotainment", "handsfree", "speaker", "soundbar",
+)
+
+private fun isHeadphoneSink(device: AudioDeviceInfo): Boolean {
+    if (!device.isSink || device.type !in HEADPHONE_TYPES) return false
+    val name = device.productName?.toString()?.lowercase() ?: return true
+    if (CAR_OR_SPEAKER_KEYWORDS.any { name.contains(it) }) return false
+    return true
+}
 
 fun Song.toMediaItem(): MediaItem = MediaItem.Builder()
     .setMediaId(id.toString())
@@ -154,6 +166,7 @@ class DotEngine(
     private var sleepJob: Job? = null
     private var lastCountedId = -1L
     private var lyricsFor = -1L
+    private var consecutiveErrors = 0
 
     var sessionPlayer: Player = SessionPlayer(players[0])
         private set
@@ -186,9 +199,17 @@ class DotEngine(
         override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) {
             if (!primed) { primed = true; return }
             if (!settings.playOnConnect.value || wantPlay || items.isEmpty()) return
-            if (added.none { it.isSink && it.type in HEADPHONE_TYPES }) return
-            // Give Bluetooth a moment to take over the audio route before starting.
-            scope.launch { delay(900); if (!wantPlay) play() }
+            val validDevice = added.firstOrNull { isHeadphoneSink(it) } ?: return
+            // Give Bluetooth a moment to take over the audio route before starting, then re-check route.
+            scope.launch {
+                delay(900)
+                if (!wantPlay && settings.playOnConnect.value && items.isNotEmpty()) {
+                    val activeSinks = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                    if (activeSinks.any { it.isSink && it.id == validDevice.id && isHeadphoneSink(it) }) {
+                        play()
+                    }
+                }
+            }
         }
     }
 
@@ -268,7 +289,10 @@ class DotEngine(
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
-            if (p === active && playbackState == Player.STATE_ENDED) { wantPlay = false; publish() }
+            if (p === active) {
+                if (playbackState == Player.STATE_READY && p.isPlaying) consecutiveErrors = 0
+                if (playbackState == Player.STATE_ENDED) { wantPlay = false; consecutiveErrors = 0; publish() }
+            }
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
@@ -284,13 +308,29 @@ class DotEngine(
 
         override fun onPlayerError(error: PlaybackException) {
             if (p !== active) return
+            consecutiveErrors++
+            val maxErrors = items.size.coerceAtLeast(1)
+            if (consecutiveErrors >= maxErrors) {
+                consecutiveErrors = 0
+                wantPlay = false
+                publish()
+                library.rescan()
+                scope.launch(Dispatchers.Main) {
+                    Toast.makeText(app, "Playback stopped: unplayable files in queue", Toast.LENGTH_LONG).show()
+                }
+                return
+            }
             val next = nextIndex()
             if (next != null && next != _state.value.index) {
                 active.seekTo(next, 0)
                 active.prepare()
             } else {
+                consecutiveErrors = 0
                 wantPlay = false
                 publish()
+                scope.launch(Dispatchers.Main) {
+                    Toast.makeText(app, "Playback stopped: unplayable track", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
@@ -307,6 +347,7 @@ class DotEngine(
     /** Plays [songs] from [start]. If shuffle is on, [start] plays first and the rest is shuffled. */
     fun playSongs(songs: List<Song>, start: Int = 0, shuffleAll: Boolean = false) {
         if (songs.isEmpty()) return
+        consecutiveErrors = 0
         val st = _state.value
         val first = start.coerceIn(0, songs.lastIndex)
         val shuffle = shuffleAll || st.shuffle
@@ -349,6 +390,7 @@ class DotEngine(
 
     fun play() {
         if (items.isEmpty() || !requestFocus()) return
+        consecutiveErrors = 0
         val p = active
         if (p.playbackState == Player.STATE_IDLE) p.prepare()
         if (p.playbackState == Player.STATE_ENDED) p.seekTo(0, 0)
@@ -394,6 +436,7 @@ class DotEngine(
 
     fun jumpTo(index: Int) {
         if (index !in items.indices) return
+        consecutiveErrors = 0
         if (wantPlay && settings.fadeOnSkip.value && settings.skipFadeMs.value > 0) {
             crossfadeTo(index, settings.skipFadeMs.value.toLong())
         } else {

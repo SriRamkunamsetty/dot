@@ -55,6 +55,10 @@ class Spectrum(
     private var channels = 2
     private var encoding = C.ENCODING_PCM_16BIT
     private var sampleRate = 44100
+    private var decimationFactor = 1
+    private var effectiveSampleRate = 44100
+    private var decimateCount = 0
+    private var decimateSum = 0f
     private var peak = 1e-3f
 
     // Onset detection
@@ -68,6 +72,7 @@ class Spectrum(
     private var prevFlux = 0f
     @Volatile private var lastBeatNs = 0L
     private val beatTimes = LongArray(16)
+    private val sortedBeatTimes = LongArray(16)
     private var beatHead = 0
     private var beatCount = 0
 
@@ -127,6 +132,10 @@ class Spectrum(
         sampleRate = sampleRateHz
         channels = channelCount.coerceAtLeast(1)
         this.encoding = encoding
+        decimationFactor = max(1, (sampleRateHz + 24000) / 48000)
+        effectiveSampleRate = sampleRateHz / decimationFactor
+        decimateCount = 0
+        decimateSum = 0f
         filled = 0
         prevLogMag.fill(0f)
         fluxCount = 0
@@ -144,12 +153,26 @@ class Spectrum(
             C.ENCODING_PCM_16BIT -> repeat(b.remaining() / (2 * channels)) {
                 var s = 0f
                 repeat(channels) { s += b.short / 32768f }
-                push(s / channels)
+                feedSample(s / channels)
             }
             C.ENCODING_PCM_FLOAT -> repeat(b.remaining() / (4 * channels)) {
                 var s = 0f
                 repeat(channels) { s += b.float }
-                push(s / channels)
+                feedSample(s / channels)
+            }
+        }
+    }
+
+    private fun feedSample(v: Float) {
+        if (decimationFactor <= 1) {
+            push(v)
+        } else {
+            decimateSum += v
+            decimateCount++
+            if (decimateCount >= decimationFactor) {
+                push(decimateSum / decimateCount)
+                decimateSum = 0f
+                decimateCount = 0
             }
         }
     }
@@ -208,7 +231,7 @@ class Spectrum(
         fft()
         for (i in 0 until n / 2) binMag[i] = sqrt(re[i] * re[i] + im[i] * im[i])
         val now = clock()
-        val binHz = sampleRate.toFloat() / n
+        val binHz = effectiveSampleRate.toFloat() / n
 
         // Levels
         val lo = 40f
@@ -289,7 +312,9 @@ class Spectrum(
                 beatHead = (beatHead + 1) % beatTimes.size
                 if (beatCount < beatTimes.size) beatCount++
                 if (beatCount >= 6) {
-                    val median = beatTimes.copyOf(beatCount).sorted()[beatCount / 2]
+                    beatTimes.copyInto(sortedBeatTimes, 0, 0, beatCount)
+                    java.util.Arrays.sort(sortedBeatTimes, 0, beatCount)
+                    val median = sortedBeatTimes[beatCount / 2]
                     var tempo = 60_000_000_000.0 / median
                     while (tempo < 70) tempo *= 2
                     while (tempo > 180) tempo /= 2

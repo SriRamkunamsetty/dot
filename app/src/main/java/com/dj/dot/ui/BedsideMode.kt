@@ -136,10 +136,10 @@ fun BedsideMode(onExit: () -> Unit) {
         AnimatedVisibility(awake, Modifier.align(Alignment.BottomCenter), enter = fadeIn(), exit = fadeOut()) {
             Row(Modifier.padding(bottom = 32.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (song != null) {
-                    IconBtn(if (state.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, { engine.toggle(); touches++ }, size = 28.dp)
-                    IconBtn(Icons.Rounded.SkipNext, { engine.next(); touches++ })
+                    IconBtn(if (state.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, { engine.toggle(); touches++ }, size = 28.dp, description = if (state.playing) "Pause" else "Play")
+                    IconBtn(Icons.Rounded.SkipNext, { engine.next(); touches++ }, description = "Next")
                 }
-                IconBtn(Icons.Rounded.Close, onExit, tint = Dot.Muted)
+                IconBtn(Icons.Rounded.Close, onExit, tint = Dot.Muted, description = "Close bedside clock")
             }
         }
     }
