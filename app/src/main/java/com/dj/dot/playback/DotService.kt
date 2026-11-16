@@ -74,13 +74,31 @@ private class ThumbnailLoader(private val context: Context) : BitmapLoader {
     override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> = executor.submit(Callable {
         runCatching {
             context.contentResolver.loadThumbnail(uri, Size(512, 512), null)
-        }.getOrNull() ?: context.contentResolver.openInputStream(uri)?.use { stream ->
-            decodeByteArrayDownsampled(stream.readBytes())
-        } ?: error("Could not load artwork from $uri")
+        }.getOrNull() ?: decodeStreamDownsampled(uri)
+        ?: error("Could not load artwork from $uri")
     })
 
     fun shutdown() {
         executor.shutdown()
+    }
+
+    private fun decodeStreamDownsampled(uri: Uri): Bitmap? {
+        // First pass: measure dimensions without decoding pixels
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        context.contentResolver.openInputStream(uri)?.use { stream ->
+            BitmapFactory.decodeStream(stream, null, bounds)
+        }
+        val maxDim = maxOf(bounds.outWidth, bounds.outHeight)
+        if (maxDim <= 0) return null
+        var sample = 1
+        while (maxDim / (sample * 2) >= 512) {
+            sample *= 2
+        }
+        // Second pass: decode at reduced sample size — stream is opened fresh, never buffered whole
+        val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sample }
+        return context.contentResolver.openInputStream(uri)?.use { stream ->
+            BitmapFactory.decodeStream(stream, null, decodeOpts)
+        }
     }
 
     private fun decodeByteArrayDownsampled(data: ByteArray): Bitmap {
