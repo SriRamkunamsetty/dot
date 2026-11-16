@@ -101,14 +101,16 @@ fun rememberVizState(spectrum: Spectrum, playing: Boolean): VizState {
     LaunchedEffect(playing) {
         var lastAudible = System.nanoTime() - AUDIO_LATENCY_NS
         var lastFrame = 0L
+        val targetBuf = FloatArray(spectrum.bands)
+        val waveBuf = FloatArray(spectrum.wavePoints)
         while (true) {
             val settled = withFrameNanos { now ->
                 // 60 fps is plenty for dots; skip every other frame on a 120 Hz screen.
                 if (now - lastFrame < FRAME_NS) return@withFrameNanos false
                 lastFrame = now
                 val audible = System.nanoTime() - AUDIO_LATENCY_NS
-                val target = if (playing) spectrum.levelsAt(audible) else null
-                val wave = if (playing) spectrum.waveAt(audible) else null
+                val target = if (playing) spectrum.levelsAt(audible, targetBuf) else null
+                val wave = if (playing) spectrum.waveAt(audible, waveBuf) else null
                 val beat = if (playing) spectrum.beatBetween(lastAudible, audible) else 0f
                 lastAudible = audible
 

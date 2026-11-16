@@ -197,34 +197,34 @@ class Spectrum(
         }
     }
 
-    /** Levels (0..1) closest to [nanoTime], or null if nothing recent. */
-    fun levelsAt(nanoTime: Long): FloatArray? = levelsAt(nanoTime, null)
-
-    /** Levels (0..1) closest to [nanoTime], copied into [out] if supplied (must have size [bands]). */
-    fun levelsAt(nanoTime: Long, out: FloatArray?): FloatArray? {
+    /** Levels (0..1) closest to [nanoTime], copied into [out] (must have size [bands]). */
+    fun levelsAt(nanoTime: Long, out: FloatArray = FloatArray(bands)): FloatArray? {
         for (attempt in 0 until 3) {
             val i = frameAt(nanoTime) ?: return null
             val s1 = histSeq.get(i)
             if (s1 == 0 || (s1 and 1) != 0) continue
-            val target = if (out != null && out.size == bands) out else FloatArray(bands)
+            val target = if (out.size == bands) out else FloatArray(bands)
             System.arraycopy(histV[i], 0, target, 0, bands)
+            // Under the Java Memory Model, plain reads in arraycopy could theoretically be reordered
+            // past this second volatile read without VarHandle.acquireFence() (API 33+), but for visualizers
+            // an occasional torn frame is harmless.
             val s2 = histSeq.get(i)
             if (s1 == s2) return target
         }
         return null
     }
 
-    /** Waveform (-1..1) closest to [nanoTime], or null if nothing recent. */
-    fun waveAt(nanoTime: Long): FloatArray? = waveAt(nanoTime, null)
-
-    /** Waveform (-1..1) closest to [nanoTime], copied into [out] if supplied (must have size [wavePoints]). */
-    fun waveAt(nanoTime: Long, out: FloatArray?): FloatArray? {
+    /** Waveform (-1..1) closest to [nanoTime], copied into [out] (must have size [wavePoints]). */
+    fun waveAt(nanoTime: Long, out: FloatArray = FloatArray(wavePoints)): FloatArray? {
         for (attempt in 0 until 3) {
             val i = frameAt(nanoTime) ?: return null
             val s1 = histSeq.get(i)
             if (s1 == 0 || (s1 and 1) != 0) continue
-            val target = if (out != null && out.size == wavePoints) out else FloatArray(wavePoints)
+            val target = if (out.size == wavePoints) out else FloatArray(wavePoints)
             System.arraycopy(histWave[i], 0, target, 0, wavePoints)
+            // Under the Java Memory Model, plain reads in arraycopy could theoretically be reordered
+            // past this second volatile read without VarHandle.acquireFence() (API 33+), but for visualizers
+            // an occasional torn frame is harmless.
             val s2 = histSeq.get(i)
             if (s1 == s2) return target
         }

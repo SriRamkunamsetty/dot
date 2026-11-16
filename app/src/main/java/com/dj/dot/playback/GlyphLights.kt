@@ -46,6 +46,7 @@ class GlyphLights(
     private val last = IntArray(LEDS) { -1 }
     private val previewBuffers = arrayOf(FloatArray(LEDS), FloatArray(LEDS))
     private var previewIdx = 0
+    private val bandBuf = FloatArray(spectrum.bands)
 
     /** What the strip is showing right now, 0..1 per LED from top to bottom, for the on-screen mirror. */
     @Volatile var preview: FloatArray = FloatArray(LEDS)
@@ -123,7 +124,7 @@ class GlyphLights(
             when (mode) {
                 GlyphMode.Meter -> {
                     // Weight the low bands: that's where the groove is.
-                    val bands = spectrum.levelsAt(audible)
+                    val bands = spectrum.levelsAt(audible, bandBuf)
                     val target = if (bands == null) 0f else ((bands[0] * 0.3f + bands[1] * 0.3f + bands[2] * 0.25f + bands[3] * 0.15f) * gain).coerceIn(0f, 1f)
                     level = if (target > level) level + (target - level) * 0.6f else level - (level - target) * 0.18f
                     val height = level * LEDS
