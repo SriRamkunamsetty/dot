@@ -115,22 +115,17 @@ class PlaylistStore(private val dir: File, private val scope: CoroutineScope) {
     fun migrateLyricsOffsets(sp: android.content.SharedPreferences) {
         val lrcKeys = sp.all.keys.filter { it.startsWith("lrc_off_") }
         if (lrcKeys.isEmpty()) return
-        val map = _lyricsOffsets.value.toMutableMap()
-        for (k in lrcKeys) {
-            val songId = k.removePrefix("lrc_off_").toLongOrNull()
-            val offset = (sp.all[k] as? Number)?.toInt() ?: 0
-            if (songId != null && songId !in map) {
-                map[songId] = offset
-            }
-        }
-        _lyricsOffsets.value = map
         scope.launch(io) {
-            val json = toJson()
-            if (!keptPrevious) {
-                keptPrevious = true
-                if (read(file) != null) runCatching { previous.write(file.readFully()) }
+            val map = _lyricsOffsets.value.toMutableMap()
+            for (k in lrcKeys) {
+                val songId = k.removePrefix("lrc_off_").toLongOrNull()
+                val offset = (sp.all[k] as? Number)?.toInt() ?: 0
+                if (songId != null && songId !in map) {
+                    map[songId] = offset
+                }
             }
-            if (runCatching { file.write(json.toByteArray()) }.isSuccess) {
+            _lyricsOffsets.value = map
+            if (writeCurrentJson()) {
                 val editor = sp.edit()
                 for (k in lrcKeys) editor.remove(k)
                 editor.apply()
@@ -314,17 +309,21 @@ class PlaylistStore(private val dir: File, private val scope: CoroutineScope) {
         save()
     }
 
+    private fun writeCurrentJson(): Boolean {
+        val json = toJson()
+        if (!keptPrevious) {
+            keptPrevious = true
+            if (read(file) != null) runCatching { previous.write(file.readFully()) }
+        }
+        return runCatching { file.write(json.toByteArray()) }.isSuccess
+    }
+
     private fun save() {
         saveJob?.cancel()
         saveJob = scope.launch {
             delay(400)
-            val json = toJson()
             withContext(io + NonCancellable) {
-                if (!keptPrevious) {
-                    keptPrevious = true
-                    if (read(file) != null) runCatching { previous.write(file.readFully()) }
-                }
-                runCatching { file.write(json.toByteArray()) }
+                writeCurrentJson()
             }
         }
     }
