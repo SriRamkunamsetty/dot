@@ -1,6 +1,7 @@
 package com.dj.dot.ui
 
 import android.graphics.Bitmap
+import android.graphics.Paint
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -28,7 +29,6 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import android.graphics.Paint
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -60,8 +60,23 @@ enum class ArtStyle(val label: String) { Cover("Cover"), DotArt("Dot art"), Halo
 private const val AUDIO_LATENCY_NS = 200_000_000L
 private const val RIPPLE_NS = 1_200_000_000L
 private const val FRAME_NS = 15_000_000L
-private const val MAX_DOTS = 2048
 private const val MAX_RIPPLE_DOTS = 128
+private const val HALO_SPOKES = 64
+private const val HALO_DOTS_PER_SPOKE = 7
+
+/** Writes one point into a drawPoints buffer and returns the new count. */
+private fun FloatArray.put(n: Int, x: Float, y: Float): Int {
+    this[n * 2] = x
+    this[n * 2 + 1] = y
+    return n + 1
+}
+
+private fun android.graphics.Canvas.drawDots(pts: FloatArray, n: Int, color: Int, width: Float, paint: Paint) {
+    if (n == 0) return
+    paint.color = color
+    paint.strokeWidth = width
+    drawPoints(pts, 0, n * 2, paint)
+}
 
 /** Smoothed, speaker-aligned analysis shared by every visualizer on screen. */
 @Stable
@@ -157,9 +172,9 @@ private fun BeatReadout(state: VizState) {
 /** Bars of dots rising from the bottom; the peak of a loud band glows red. */
 @Composable
 private fun GridViz(state: VizState, modifier: Modifier, rows: Int = 9) {
-    val faintPts = remember { FloatArray(MAX_DOTS * 2) }
-    val whitePts = remember { FloatArray(MAX_DOTS * 2) }
-    val redPts = remember { FloatArray(MAX_DOTS * 2) }
+    val faintPts = remember(state.bands, rows) { FloatArray(state.bands * rows * 2) }
+    val whitePts = remember(state.bands, rows) { FloatArray(state.bands * rows * 2) }
+    val redPts = remember(state.bands, rows) { FloatArray(state.bands * rows * 2) }
     val paint = remember { Paint().apply { strokeCap = Paint.Cap.ROUND; isAntiAlias = true } }
     val faintColor = remember { Dot.Faint.toArgbInt() }
     val whiteColor = remember { Dot.White.toArgbInt() }
@@ -182,25 +197,14 @@ private fun GridViz(state: VizState, modifier: Modifier, rows: Int = 9) {
                 val on = row < lit
                 val y = size.height - (row * rh + rh / 2)
                 when {
-                    on && row < flashRows -> {
-                        redPts[redCount * 2] = cx
-                        redPts[redCount * 2 + 1] = y
-                        redCount++
-                    }
-                    on && row == lit - 1 && lit >= rows - 2 -> {
-                        redPts[redCount * 2] = cx
-                        redPts[redCount * 2 + 1] = y
-                        redCount++
+                    on && (row < flashRows || (row == lit - 1 && lit >= rows - 2)) -> {
+                        redCount = redPts.put(redCount, cx, y)
                     }
                     on -> {
-                        whitePts[whiteCount * 2] = cx
-                        whitePts[whiteCount * 2 + 1] = y
-                        whiteCount++
+                        whiteCount = whitePts.put(whiteCount, cx, y)
                     }
                     else -> {
-                        faintPts[faintCount * 2] = cx
-                        faintPts[faintCount * 2 + 1] = y
-                        faintCount++
+                        faintCount = faintPts.put(faintCount, cx, y)
                     }
                 }
             }
@@ -208,19 +212,9 @@ private fun GridViz(state: VizState, modifier: Modifier, rows: Int = 9) {
         val diameter = r * 2f
         drawIntoCanvas { canvas ->
             val native = canvas.nativeCanvas
-            paint.strokeWidth = diameter
-            if (faintCount > 0) {
-                paint.color = faintColor
-                native.drawPoints(faintPts, 0, faintCount * 2, paint)
-            }
-            if (whiteCount > 0) {
-                paint.color = whiteColor
-                native.drawPoints(whitePts, 0, whiteCount * 2, paint)
-            }
-            if (redCount > 0) {
-                paint.color = redColor
-                native.drawPoints(redPts, 0, redCount * 2, paint)
-            }
+            native.drawDots(faintPts, faintCount, faintColor, diameter, paint)
+            native.drawDots(whitePts, whiteCount, whiteColor, diameter, paint)
+            native.drawDots(redPts, redCount, redColor, diameter, paint)
         }
     }
 }
@@ -228,9 +222,10 @@ private fun GridViz(state: VizState, modifier: Modifier, rows: Int = 9) {
 /** Bars mirrored above and below a centre line, which flashes red on beats. */
 @Composable
 private fun MirrorViz(state: VizState, modifier: Modifier, rows: Int = 11) {
-    val faintPts = remember { FloatArray(MAX_DOTS * 2) }
-    val whitePts = remember { FloatArray(MAX_DOTS * 2) }
-    val redPts = remember { FloatArray(MAX_DOTS * 2) }
+    val count = (state.bands * 2 - 1) * rows
+    val faintPts = remember(state.bands, rows) { FloatArray(count * 2) }
+    val whitePts = remember(state.bands, rows) { FloatArray(count * 2) }
+    val redPts = remember(state.bands, rows) { FloatArray(count * 2) }
     val paint = remember { Paint().apply { strokeCap = Paint.Cap.ROUND; isAntiAlias = true } }
     val faintColor = remember { Dot.Faint.toArgbInt() }
     val whiteColor = remember { Dot.White.toArgbInt() }
@@ -256,25 +251,14 @@ private fun MirrorViz(state: VizState, modifier: Modifier, rows: Int = 11) {
                 val on = d <= reach && (reach > 0 || d == 0)
                 val y = row * rh + rh / 2
                 when {
-                    d == 0 && state.pulse > 0.3f -> {
-                        redPts[redCount * 2] = cx
-                        redPts[redCount * 2 + 1] = y
-                        redCount++
-                    }
-                    on && d == reach && reach >= mid - 1 -> {
-                        redPts[redCount * 2] = cx
-                        redPts[redCount * 2 + 1] = y
-                        redCount++
+                    (d == 0 && state.pulse > 0.3f) || (on && d == reach && reach >= mid - 1) -> {
+                        redCount = redPts.put(redCount, cx, y)
                     }
                     on -> {
-                        whitePts[whiteCount * 2] = cx
-                        whitePts[whiteCount * 2 + 1] = y
-                        whiteCount++
+                        whiteCount = whitePts.put(whiteCount, cx, y)
                     }
                     else -> {
-                        faintPts[faintCount * 2] = cx
-                        faintPts[faintCount * 2 + 1] = y
-                        faintCount++
+                        faintCount = faintPts.put(faintCount, cx, y)
                     }
                 }
             }
@@ -282,19 +266,9 @@ private fun MirrorViz(state: VizState, modifier: Modifier, rows: Int = 11) {
         val diameter = r * 2f
         drawIntoCanvas { canvas ->
             val native = canvas.nativeCanvas
-            paint.strokeWidth = diameter
-            if (faintCount > 0) {
-                paint.color = faintColor
-                native.drawPoints(faintPts, 0, faintCount * 2, paint)
-            }
-            if (whiteCount > 0) {
-                paint.color = whiteColor
-                native.drawPoints(whitePts, 0, whiteCount * 2, paint)
-            }
-            if (redCount > 0) {
-                paint.color = redColor
-                native.drawPoints(redPts, 0, redCount * 2, paint)
-            }
+            native.drawDots(faintPts, faintCount, faintColor, diameter, paint)
+            native.drawDots(whitePts, whiteCount, whiteColor, diameter, paint)
+            native.drawDots(redPts, redCount, redColor, diameter, paint)
         }
     }
 }
@@ -302,10 +276,11 @@ private fun MirrorViz(state: VizState, modifier: Modifier, rows: Int = 11) {
 /** Dot-matrix oscilloscope of the actual waveform. */
 @Composable
 private fun WaveViz(state: VizState, modifier: Modifier, rows: Int = 11) {
-    val faintPts = remember { FloatArray(MAX_DOTS * 2) }
-    val mutedPts = remember { FloatArray(MAX_DOTS * 2) }
-    val whitePts = remember { FloatArray(MAX_DOTS * 2) }
-    val redPts = remember { FloatArray(MAX_DOTS * 2) }
+    val count = state.wave.size * rows
+    val faintPts = remember(state.wave.size, rows) { FloatArray(count * 2) }
+    val mutedPts = remember(state.wave.size, rows) { FloatArray(count * 2) }
+    val whitePts = remember(state.wave.size, rows) { FloatArray(count * 2) }
+    val redPts = remember(state.wave.size, rows) { FloatArray(count * 2) }
     val paint = remember { Paint().apply { strokeCap = Paint.Cap.ROUND; isAntiAlias = true } }
     val faintColor = remember { Dot.Faint.toArgbInt() }
     val mutedColor = remember { Dot.Muted.toArgbInt() }
@@ -333,24 +308,16 @@ private fun WaveViz(state: VizState, modifier: Modifier, rows: Int = 11) {
                 when {
                     row == target -> {
                         if (state.pulse > 0.35f) {
-                            redPts[redCount * 2] = cx
-                            redPts[redCount * 2 + 1] = y
-                            redCount++
+                            redCount = redPts.put(redCount, cx, y)
                         } else {
-                            whitePts[whiteCount * 2] = cx
-                            whitePts[whiteCount * 2 + 1] = y
-                            whiteCount++
+                            whiteCount = whitePts.put(whiteCount, cx, y)
                         }
                     }
                     row in lo..hi -> {
-                        mutedPts[mutedCount * 2] = cx
-                        mutedPts[mutedCount * 2 + 1] = y
-                        mutedCount++
+                        mutedCount = mutedPts.put(mutedCount, cx, y)
                     }
                     else -> {
-                        faintPts[faintCount * 2] = cx
-                        faintPts[faintCount * 2 + 1] = y
-                        faintCount++
+                        faintCount = faintPts.put(faintCount, cx, y)
                     }
                 }
             }
@@ -358,26 +325,10 @@ private fun WaveViz(state: VizState, modifier: Modifier, rows: Int = 11) {
         val diameter = r * 2f
         drawIntoCanvas { canvas ->
             val native = canvas.nativeCanvas
-            if (faintCount > 0) {
-                paint.strokeWidth = diameter * 0.8f
-                paint.color = faintColor
-                native.drawPoints(faintPts, 0, faintCount * 2, paint)
-            }
-            if (mutedCount > 0) {
-                paint.strokeWidth = diameter * 0.8f
-                paint.color = mutedColor
-                native.drawPoints(mutedPts, 0, mutedCount * 2, paint)
-            }
-            if (whiteCount > 0) {
-                paint.strokeWidth = diameter * 1.15f
-                paint.color = whiteColor
-                native.drawPoints(whitePts, 0, whiteCount * 2, paint)
-            }
-            if (redCount > 0) {
-                paint.strokeWidth = diameter * 1.15f
-                paint.color = redColor
-                native.drawPoints(redPts, 0, redCount * 2, paint)
-            }
+            native.drawDots(faintPts, faintCount, faintColor, diameter * 0.8f, paint)
+            native.drawDots(mutedPts, mutedCount, mutedColor, diameter * 0.8f, paint)
+            native.drawDots(whitePts, whiteCount, whiteColor, diameter * 1.15f, paint)
+            native.drawDots(redPts, redCount, redColor, diameter * 1.15f, paint)
         }
     }
 }
@@ -552,9 +503,10 @@ private fun androidx.compose.ui.graphics.Color.toArgbInt(): Int = android.graphi
  */
 @Composable
 fun HaloViz(song: Song, state: VizState, modifier: Modifier = Modifier) {
-    val faintPts = remember { FloatArray(MAX_DOTS * 2) }
-    val whitePts = remember { FloatArray(MAX_DOTS * 2) }
-    val redPts = remember { FloatArray(MAX_DOTS * 2) }
+    val count = HALO_SPOKES * HALO_DOTS_PER_SPOKE
+    val faintPts = remember { FloatArray(count * 2) }
+    val whitePts = remember { FloatArray(count * 2) }
+    val redPts = remember { FloatArray(count * 2) }
     val ripplePts = remember { FloatArray(MAX_RIPPLE_DOTS * 2) }
     val paint = remember { Paint().apply { strokeCap = Paint.Cap.ROUND; isAntiAlias = true } }
     val faintColor = remember { Dot.Faint.toArgbInt() }
@@ -568,8 +520,8 @@ fun HaloViz(song: Song, state: VizState, modifier: Modifier = Modifier) {
             val cy = size.height / 2
             val maxR = min(size.width, size.height) / 2
             val inner = maxR * 0.5f
-            val spokes = 64
-            val dotsPerSpoke = 7
+            val spokes = HALO_SPOKES
+            val dotsPerSpoke = HALO_DOTS_PER_SPOKE
             val gap = (maxR - inner) / (dotsPerSpoke + 0.5f)
             val r = gap * 0.28f
 
@@ -590,19 +542,13 @@ fun HaloViz(song: Song, state: VizState, modifier: Modifier = Modifier) {
                     val py = cy + sa * dist
                     when {
                         on && d == lit - 1 && lit >= dotsPerSpoke - 1 -> {
-                            redPts[redCount * 2] = px
-                            redPts[redCount * 2 + 1] = py
-                            redCount++
+                            redCount = redPts.put(redCount, px, py)
                         }
                         on -> {
-                            whitePts[whiteCount * 2] = px
-                            whitePts[whiteCount * 2 + 1] = py
-                            whiteCount++
+                            whiteCount = whitePts.put(whiteCount, px, py)
                         }
                         else -> {
-                            faintPts[faintCount * 2] = px
-                            faintPts[faintCount * 2 + 1] = py
-                            faintCount++
+                            faintCount = faintPts.put(faintCount, px, py)
                         }
                     }
                 }
@@ -610,19 +556,9 @@ fun HaloViz(song: Song, state: VizState, modifier: Modifier = Modifier) {
             val diameter = r * 2f
             drawIntoCanvas { canvas ->
                 val native = canvas.nativeCanvas
-                paint.strokeWidth = diameter
-                if (faintCount > 0) {
-                    paint.color = faintColor
-                    native.drawPoints(faintPts, 0, faintCount * 2, paint)
-                }
-                if (whiteCount > 0) {
-                    paint.color = whiteColor
-                    native.drawPoints(whitePts, 0, whiteCount * 2, paint)
-                }
-                if (redCount > 0) {
-                    paint.color = redColor
-                    native.drawPoints(redPts, 0, redCount * 2, paint)
-                }
+                native.drawDots(faintPts, faintCount, faintColor, diameter, paint)
+                native.drawDots(whitePts, whiteCount, whiteColor, diameter, paint)
+                native.drawDots(redPts, redCount, redColor, diameter, paint)
 
                 val now = state.frame
                 for ((start, strength) in state.ripples) {
@@ -635,9 +571,7 @@ fun HaloViz(song: Song, state: VizState, modifier: Modifier = Modifier) {
                         ripplePts[k * 2] = cx + cos(a) * radius
                         ripplePts[k * 2 + 1] = cy + sin(a) * radius
                     }
-                    paint.strokeWidth = r * 2.2f
-                    paint.color = Dot.Red.copy(alpha = alpha).toArgbInt()
-                    native.drawPoints(ripplePts, 0, dots * 2, paint)
+                    native.drawDots(ripplePts, dots, Dot.Red.copy(alpha = alpha).toArgbInt(), r * 2.2f, paint)
                 }
             }
         }
