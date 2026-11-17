@@ -29,6 +29,8 @@ class Library(
     private val _data = MutableStateFlow(LibraryData())
     val data: StateFlow<LibraryData> = _data
     val scanning = MutableStateFlow(false)
+    private val _rawSongIds = MutableStateFlow<Set<Long>?>(null)
+    val rawSongIds: StateFlow<Set<Long>?> = _rawSongIds
 
     private var observer: ContentObserver? = null
     private var scanJob: Job? = null
@@ -62,7 +64,8 @@ class Library(
             delay(debounceMs)
             scanning.value = true
             val key = snapshotKey()
-            val songs = withContext(Dispatchers.IO) { query() }
+            val (songs, rawIds) = withContext(Dispatchers.IO) { query() }
+            _rawSongIds.value = rawIds
             _data.value = withContext(Dispatchers.Default) { LibraryData.build(songs) }
             scanning.value = false
             onScanComplete()
@@ -103,7 +106,7 @@ class Library(
         cacheFile.write(JSONObject().put("key", key).put("songs", arr).toString().toByteArray())
     }
 
-    private fun query(): List<Song> {
+    private fun query(): Pair<List<Song>, Set<Long>> {
         val minMs = settings.minDurationSec.value * 1000L
         val projection = arrayOf(
             MediaStore.Audio.Media._ID, MediaStore.Audio.Media.TITLE, MediaStore.Audio.Media.ARTIST,
@@ -112,9 +115,9 @@ class Library(
             MediaStore.Audio.Media.DATE_ADDED,
         )
         val out = ArrayList<Song>()
+        val rawIds = HashSet<Long>()
         context.contentResolver.query(
-            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, projection,
-            "${MediaStore.Audio.Media.DURATION} >= ?", arrayOf(minMs.toString()), null,
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, projection, null, null, null,
         )?.use { c ->
             val iId = c.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
             val iTitle = c.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
@@ -129,6 +132,9 @@ class Library(
             val hideWhatsApp = settings.hideWhatsApp.value
             while (c.moveToNext()) {
                 val id = c.getLong(iId)
+                rawIds += id
+                val dur = c.getLong(iDur)
+                if (c.isNull(iDur) || dur < minMs) continue
                 val path = c.getString(iData).orEmpty()
                 val fileName = path.substringAfterLast('/').substringBeforeLast('.')
                 if (hideWhatsApp && isWhatsApp(path, fileName)) continue
@@ -138,7 +144,7 @@ class Library(
                     artist = c.getString(iArtist).clean("Unknown artist"),
                     album = c.getString(iAlbum).clean("Unknown album"),
                     albumId = c.getLong(iAlbumId),
-                    duration = c.getLong(iDur),
+                    duration = dur,
                     track = c.getInt(iTrack) % 1000,
                     year = c.getInt(iYear),
                     path = path,
@@ -147,7 +153,7 @@ class Library(
                 )
             }
         }
-        return out
+        return out to rawIds
     }
 
     private fun String?.clean(fallback: String) =

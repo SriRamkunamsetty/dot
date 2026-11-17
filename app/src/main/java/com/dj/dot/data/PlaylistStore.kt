@@ -75,20 +75,12 @@ class PlaylistStore(
             runCatching { file.baseFile.copyTo(File(dir, "library.json.corrupt"), overwrite = true) }
         }
         loaded?.let(::load)
-        pruneDailyStats()
+        pruneDailyStatsInternal()
         _loaded.value = true
     }
 
     suspend fun awaitLoaded() {
         loaded.first { it }
-    }
-
-    fun awaitLoadedSync(timeoutMs: Long = 3000): PlaylistStore {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (!_loaded.value && System.currentTimeMillis() < deadline) {
-            Thread.sleep(10)
-        }
-        return this
     }
 
     private fun read(f: AtomicFile): JSONObject? =
@@ -130,15 +122,31 @@ class PlaylistStore(
         }
     }
 
+    private inline fun mutate(crossinline block: () -> Unit) {
+        if (_loaded.value) {
+            block()
+        } else {
+            scope.launch {
+                loaded.first { it }
+                block()
+            }
+        }
+    }
+
     fun create(name: String, songIds: List<Long> = emptyList()): String {
         val id = UUID.randomUUID().toString()
-        _playlists.value = _playlists.value + Playlist(id, name.trim().ifEmpty { "Playlist" }, songIds)
-        save()
+        mutate {
+            _playlists.value = _playlists.value + Playlist(id, name.trim().ifEmpty { "Playlist" }, songIds)
+            save()
+        }
         return id
     }
 
     fun rename(id: String, name: String) = edit(id) { it.copy(name = name.trim().ifEmpty { it.name }) }
-    fun delete(id: String) { _playlists.value = _playlists.value.filterNot { it.id == id }; save() }
+    fun delete(id: String) = mutate {
+        _playlists.value = _playlists.value.filterNot { it.id == id }
+        save()
+    }
     fun add(id: String, songIds: List<Long>) = edit(id) { p ->
         val existing = p.songIds.toHashSet()
         p.copy(songIds = p.songIds + songIds.filter { existing.add(it) })
@@ -153,33 +161,25 @@ class PlaylistStore(
         p.copy(songIds = l)
     }
 
-    fun toggleFavourite(songId: Long) {
+    fun toggleFavourite(songId: Long) = mutate {
         val f = _favourites.value
         _favourites.value = if (songId in f) f - songId else f + songId
         save()
     }
 
-    fun countPlay(songId: Long) {
+    fun countPlay(songId: Long) = mutate {
         val c = _playCounts.value
         _playCounts.value = c + (songId to (c[songId] ?: 0) + 1)
         save()
     }
 
     /** Forgets every learned tempo so songs are measured again. */
-    fun clearBpm() {
-        if (!_loaded.value) {
-            scope.launch(io) {
-                loaded.first { it }
-                _bpm.value = emptyMap()
-                save()
-            }
-        } else {
-            _bpm.value = emptyMap()
-            save()
-        }
+    fun clearBpm() = mutate {
+        _bpm.value = emptyMap()
+        save()
     }
 
-    fun setBpm(songId: Long, bpm: Int) {
+    fun setBpm(songId: Long, bpm: Int) = mutate {
         _bpm.value = _bpm.value + (songId to bpm)
         save()
     }
@@ -189,14 +189,24 @@ class PlaylistStore(
         val now = Calendar.getInstance()
         val day = "%04d-%02d-%02d".format(now.get(Calendar.YEAR), now.get(Calendar.MONTH) + 1, now.get(Calendar.DAY_OF_MONTH))
         val hour = now.get(Calendar.HOUR_OF_DAY)
-        _listenMs.value = _listenMs.value + (songId to (_listenMs.value[songId] ?: 0L) + ms)
-        _dailyMs.value = _dailyMs.value + (day to (_dailyMs.value[day] ?: 0L) + ms)
-        _hourMs.value = _hourMs.value.toMutableList().also { it[hour] += ms }
-        save()
+        mutate {
+            _listenMs.value = _listenMs.value + (songId to (_listenMs.value[songId] ?: 0L) + ms)
+            _dailyMs.value = _dailyMs.value + (day to (_dailyMs.value[day] ?: 0L) + ms)
+            _hourMs.value = _hourMs.value.toMutableList().also { it[hour] += ms }
+            save()
+        }
     }
 
-    /** Rolls daily stats older than ~13 months into monthly totals to keep daily history bounded. */
-    fun pruneDailyStats(nowMs: Long = System.currentTimeMillis()) {
+    /**
+     * Rolls daily stats older than ~13 months into monthly totals to keep daily history bounded.
+     * Note: Wrapped's streak walks back day by day through daily, so a streak longer than 13
+     * months will stop at this cutoff.
+     */
+    fun pruneDailyStats(nowMs: Long = System.currentTimeMillis()) = mutate {
+        pruneDailyStatsInternal(nowMs)
+    }
+
+    private fun pruneDailyStatsInternal(nowMs: Long = System.currentTimeMillis()) {
         val cutoffCal = Calendar.getInstance().apply {
             timeInMillis = nowMs
             add(Calendar.MONTH, -13)
@@ -224,20 +234,14 @@ class PlaylistStore(
         }
     }
 
-    /** Removes playback counts, listen time, and BPM records for songs that no longer exist. */
-    fun pruneOrphanStats(validSongIds: Set<Long>) {
-        if (!_loaded.value || validSongIds.isEmpty()) return
+    /** Removes playback counts and BPM records for songs that no longer exist. */
+    fun pruneOrphanStats(validSongIds: Set<Long>) = mutate {
+        if (validSongIds.isEmpty()) return@mutate
         var changed = false
         val counts = _playCounts.value
         val prunedCounts = counts.filterKeys { it in validSongIds }
         if (prunedCounts.size != counts.size) {
             _playCounts.value = prunedCounts
-            changed = true
-        }
-        val listen = _listenMs.value
-        val prunedListen = listen.filterKeys { it in validSongIds }
-        if (prunedListen.size != listen.size) {
-            _listenMs.value = prunedListen
             changed = true
         }
         val bpm = _bpm.value
@@ -293,7 +297,7 @@ class PlaylistStore(
      * Replaces playlists, favourites and stats with a parsed [backup]. The data it replaces is kept in
      * `library.json.before-restore` so a restore can be undone by hand.
      */
-    fun restore(backup: Backup) {
+    fun restore(backup: Backup) = mutate {
         val before = toJson()
         scope.launch(io + NonCancellable) { runCatching { AtomicFile(File(dir, "library.json.before-restore")).write(before.toByteArray()) } }
         _playlists.value = backup.playlists
@@ -365,7 +369,7 @@ class PlaylistStore(
         }
     }
 
-    private inline fun edit(id: String, crossinline f: (Playlist) -> Playlist) {
+    private inline fun edit(id: String, crossinline f: (Playlist) -> Playlist) = mutate {
         _playlists.value = _playlists.value.map { if (it.id == id) f(it) else it }
         save()
     }
@@ -373,6 +377,7 @@ class PlaylistStore(
     private fun save() {
         saveJob?.cancel()
         saveJob = scope.launch {
+            loaded.first { it }
             delay(400)
             val json = toJson()
             withContext(io + NonCancellable) {

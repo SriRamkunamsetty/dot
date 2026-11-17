@@ -4,6 +4,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
@@ -156,13 +158,12 @@ class PlaylistStoreTest {
     @Test fun loadsAsynchronouslyWithoutBlockingCaller() {
         File(dir, "library.json").writeText(libraryJson("Async Mix"))
         val store = PlaylistStore(dir, scope, async = true)
-        store.awaitLoadedSync()
+        runBlocking { store.awaitLoaded() }
         assertTrue(store.loaded.value)
         assertEquals("Async Mix", store.playlists.value.single().name)
     }
 
     @Test fun pruneDailyStatsRollsOlderThan13MonthsIntoMonthlyTotals() {
-        val store = PlaylistStore(dir, scope, async = false)
         // Add daily entries older than 13 months (~400 days) and a recent one
         val cal = java.util.Calendar.getInstance()
         cal.add(java.util.Calendar.MONTH, -14)
@@ -170,7 +171,12 @@ class PlaylistStoreTest {
         val oldDay2 = "%04d-%02d-%02d".format(cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH) + 1, 20)
         val oldMonth = oldDay1.substring(0, 7)
 
-        val recentDay = "2026-11-01"
+        val recentCal = java.util.Calendar.getInstance()
+        val recentDay = "%04d-%02d-%02d".format(
+            recentCal.get(java.util.Calendar.YEAR),
+            recentCal.get(java.util.Calendar.MONTH) + 1,
+            recentCal.get(java.util.Calendar.DAY_OF_MONTH)
+        )
 
         val json = JSONObject()
             .put("daily", JSONObject().put(oldDay1, 30_000L).put(oldDay2, 45_000L).put(recentDay, 10_000L))
@@ -185,7 +191,7 @@ class PlaylistStoreTest {
         assertFalse(daily.containsKey(oldDay2))
     }
 
-    @Test fun pruneOrphanStatsDropsNonExistentSongIds() {
+    @Test fun pruneOrphanStatsPreservesListenTimeTotals() {
         val json = JSONObject()
             .put("counts", JSONObject().put("1", 10).put("999", 5))
             .put("listen", JSONObject().put("1", 50000L).put("999", 25000L))
@@ -195,10 +201,37 @@ class PlaylistStoreTest {
 
         val store = PlaylistStore(dir, scope, async = false)
         assertEquals(2, store.playCounts.value.size)
+        val totalListenBefore = store.listenMs.value.values.sum()
         // Valid songs only include ID 1
         store.pruneOrphanStats(setOf(1L))
         assertEquals(mapOf(1L to 10), store.playCounts.value)
-        assertEquals(mapOf(1L to 50000L), store.listenMs.value)
+        // Lifetime listening minutes on Now and Wrapped are preserved
+        assertEquals(totalListenBefore, store.listenMs.value.values.sum())
+        assertEquals(25000L, store.listenMs.value[999L])
         assertEquals(mapOf(1L to 120), store.bpm.value)
+    }
+
+    @Test fun mutatorsBeforeLoadCompletesAreDeferredAndPreserved() = runBlocking {
+        val json = JSONObject()
+            .put("favourites", JSONArray().put(1L))
+            .put("counts", JSONObject().put("1", 10))
+            .toString()
+        File(dir, "library.json").writeText(json)
+
+        val store = PlaylistStore(dir, scope, async = true)
+        // Mutate immediately before store has finished async loading
+        store.toggleFavourite(2L)
+        store.countPlay(1L)
+        store.create("Queued Playlist")
+
+        store.awaitLoaded()
+        store.favourites.first { it.contains(2L) }
+        store.playCounts.first { it[1L] == 11 }
+        store.playlists.first { it.any { p -> p.name == "Queued Playlist" } }
+
+        assertTrue(store.favourites.value.contains(1L))
+        assertTrue(store.favourites.value.contains(2L))
+        assertEquals(11, store.playCounts.value[1L])
+        assertEquals("Queued Playlist", store.playlists.value.single().name)
     }
 }

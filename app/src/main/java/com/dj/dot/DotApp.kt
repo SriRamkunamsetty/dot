@@ -1,6 +1,7 @@
 package com.dj.dot
 
 import android.app.Application
+import android.provider.MediaStore
 import com.dj.dot.data.Library
 import com.dj.dot.data.PlaylistStore
 import com.dj.dot.data.Settings
@@ -13,6 +14,8 @@ import com.dj.dot.widget.DotWidget
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -38,9 +41,13 @@ class DotApp : Application() {
         }
         library = Library(this, scope, settings, onScanComplete = { ArtLoader.clearMissing() })
         scope.launch {
-            library.data.collect { lib ->
-                if (lib.songs.isNotEmpty()) {
-                    store.pruneOrphanStats(lib.byId.keys)
+            library.rawSongIds.filterNotNull().first().let { rawIds ->
+                if (rawIds.isNotEmpty()) {
+                    val volumes = runCatching { MediaStore.getExternalVolumeNames(this@DotApp) }.getOrNull()?.size ?: 1
+                    if (volumes >= settings.lastVolumeCount.value) {
+                        settings.lastVolumeCount.set(volumes)
+                        store.pruneOrphanStats(rawIds)
+                    }
                 }
             }
         }

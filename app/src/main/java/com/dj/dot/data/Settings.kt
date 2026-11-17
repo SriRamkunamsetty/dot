@@ -103,6 +103,7 @@ class Settings(context: Context) {
 
     /** Bumped when learned tempos from older versions can't be trusted and must be relearned. */
     val tempoVersion = portableInt("tempo_version", 1)
+    val lastVolumeCount = int("last_volume_count", 0)
 
     // Restored session
     val queueIds = string("q_ids", "")
