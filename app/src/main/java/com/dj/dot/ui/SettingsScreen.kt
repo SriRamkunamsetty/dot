@@ -1,7 +1,6 @@
 package com.dj.dot.ui
 
 import android.app.Activity
-import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -202,7 +201,7 @@ fun SettingsScreen() {
 
         item { Section("Background") }
         item {
-            NavRow("Keep playing in background", if (unrestricted) "Unrestricted" else "Tap so Nothing OS never stops playback") {
+            NavRow("Keep playing in background", if (unrestricted) "Unrestricted" else "Tap, then set Battery to Unrestricted") {
                 if (!unrestricted) requestUnrestricted(context)
             }
         }
@@ -222,12 +221,12 @@ private fun isUnrestricted(context: Context) =
 
 private fun requestUnrestricted(context: Context) {
     runCatching {
-        context.startActivity(Intent(AndroidSettings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        context.startActivity(
+            Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")),
+        )
     }.onFailure {
         runCatching {
-            context.startActivity(
-                Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")),
-            )
+            context.startActivity(Intent(AndroidSettings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
         }
     }
 }
