@@ -74,42 +74,28 @@ private class ThumbnailLoader(private val context: Context) : BitmapLoader {
     override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> = executor.submit(Callable {
         runCatching {
             context.contentResolver.loadThumbnail(uri, Size(512, 512), null)
-        }.getOrNull() ?: decodeStreamDownsampled(uri)
-        ?: error("Could not load artwork from $uri")
+        }.getOrNull() ?: error("Could not load artwork from $uri")
     })
 
     fun shutdown() {
         executor.shutdown()
     }
 
-    private fun decodeStreamDownsampled(uri: Uri): Bitmap? {
-        // First pass: measure dimensions without decoding pixels
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use { stream ->
-            BitmapFactory.decodeStream(stream, null, bounds)
-        }
-        val maxDim = maxOf(bounds.outWidth, bounds.outHeight)
-        if (maxDim <= 0) return null
-        var sample = 1
-        while (maxDim / (sample * 2) >= 512) {
-            sample *= 2
-        }
-        // Second pass: decode at reduced sample size — stream is opened fresh, never buffered whole
-        val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sample }
-        return context.contentResolver.openInputStream(uri)?.use { stream ->
-            BitmapFactory.decodeStream(stream, null, decodeOpts)
-        }
-    }
-
     private fun decodeByteArrayDownsampled(data: ByteArray): Bitmap {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(data, 0, data.size, bounds)
         val maxDim = maxOf(bounds.outWidth, bounds.outHeight)
-        var sample = 1
-        while (maxDim / (sample * 2) >= 512) {
-            sample *= 2
-        }
+        val sample = computeSampleSize(maxDim, 512)
         val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sample }
         return BitmapFactory.decodeByteArray(data, 0, data.size, decodeOpts) ?: error("Could not decode artwork")
     }
+}
+
+internal fun computeSampleSize(maxDim: Int, target: Int = 512): Int {
+    if (maxDim <= 0) return 1
+    var sample = 1
+    while (maxDim / (sample * 2) >= target) {
+        sample *= 2
+    }
+    return sample
 }
