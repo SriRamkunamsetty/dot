@@ -67,14 +67,14 @@ class SpectrumTest {
     @Test fun `a low tone lights the low bands, not the high ones`() {
         val s = spectrum()
         feed(s, 1.0) { t -> 0.6 * sin(2 * PI * 80 * t) }
-        val levels = s.levelsAt(now)!!
+        val levels = s.levelsAt(now, FloatArray(s.bands))!!
         assertTrue(levels.take(4).max() > levels.takeLast(4).max() + 0.3f)
     }
 
     @Test fun `does no work while nobody listens`() {
         val s = Spectrum(clock = { now }).apply { flush(rate, 2, C.ENCODING_PCM_16BIT) }
         feed(s, 2.0, kicks(0.5))
-        assertTrue(s.levelsAt(now) == null && s.bpm == 0)
+        assertTrue(s.levelsAt(now, FloatArray(s.bands)) == null && s.bpm == 0)
     }
 
     private fun feedAtRate(s: Spectrum, sampleRate: Int, seconds: Double, sample: (Double) -> Double) {
@@ -105,28 +105,32 @@ class SpectrumTest {
             assertTrue("bpm at $testRate Hz was ${s.bpm}", s.bpm in 116..124)
 
             feedAtRate(s, testRate, 1.0) { t -> 0.6 * sin(2 * PI * 80 * t) }
-            val levels = s.levelsAt(now)!!
+            val levels = s.levelsAt(now, FloatArray(s.bands))!!
             assertTrue("low bands light at $testRate Hz", levels.take(4).max() > levels.takeLast(4).max() + 0.3f)
         }
     }
 
-    @Test fun `returns independent copy of levels and waveform array`() {
+    @Test fun `modifying destination buffer does not mutate internal spectrum state`() {
         val s = Spectrum(clock = { now }).apply {
             acquire(needsWave = true)
             flush(rate, 2, C.ENCODING_PCM_16BIT)
         }
         feed(s, 1.0) { t -> 0.5 * sin(2 * PI * 100 * t) }
-        val levels1 = s.levelsAt(now)!!
+        val levels1 = FloatArray(s.bands)
+        s.levelsAt(now, levels1)
         val originalVal = levels1[0]
         levels1[0] = 999f
-        val levels2 = s.levelsAt(now)!!
-        assertTrue("Modifying returned array must not mutate internal buffer", levels2[0] == originalVal)
+        val levels2 = FloatArray(s.bands)
+        s.levelsAt(now, levels2)
+        assertTrue("Modifying destination array must not mutate internal buffer", levels2[0] == originalVal)
 
-        val wave1 = s.waveAt(now)!!
+        val wave1 = FloatArray(s.wavePoints)
+        s.waveAt(now, wave1)
         val originalWaveVal = wave1[0]
         wave1[0] = 999f
-        val wave2 = s.waveAt(now)!!
-        assertTrue("Modifying returned wave must not mutate internal buffer", wave2[0] == originalWaveVal)
+        val wave2 = FloatArray(s.wavePoints)
+        s.waveAt(now, wave2)
+        assertTrue("Modifying destination wave must not mutate internal buffer", wave2[0] == originalWaveVal)
     }
 
     @Test fun `supports caller provided destination buffer`() {
@@ -156,11 +160,12 @@ class SpectrumTest {
         val readers = (0 until 4).map {
             Thread {
                 val out = FloatArray(s.bands)
+                val waveOut = FloatArray(s.wavePoints)
                 while (!stop.get()) {
                     try {
                         val t = System.nanoTime()
                         s.levelsAt(t, out)
-                        s.waveAt(t)
+                        s.waveAt(t, waveOut)
                         s.beatBetween(t - 100_000_000L, t)
                     } catch (e: Throwable) {
                         errors.add(e)
@@ -183,6 +188,5 @@ class SpectrumTest {
         stop.set(true)
         readers.forEach { it.join(1000) }
         assertTrue("No exceptions during concurrent reads/writes", errors.isEmpty())
-    }
     }
 }

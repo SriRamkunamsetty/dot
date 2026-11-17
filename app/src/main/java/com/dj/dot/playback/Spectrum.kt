@@ -13,6 +13,7 @@ import kotlin.math.cos
 import kotlin.math.ln
 import kotlin.math.log10
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -197,39 +198,29 @@ class Spectrum(
         }
     }
 
-    /** Levels (0..1) closest to [nanoTime], copied into [out] (must have size [bands]). */
-    fun levelsAt(nanoTime: Long, out: FloatArray = FloatArray(bands)): FloatArray? {
+    /** Copies the frame closest to [nanoTime] from [src] into [out]. */
+    private fun copyFrame(nanoTime: Long, src: Array<FloatArray>, len: Int, out: FloatArray): FloatArray? {
+        val count = min(len, out.size)
         for (attempt in 0 until 3) {
             val i = frameAt(nanoTime) ?: return null
             val s1 = histSeq.get(i)
             if (s1 == 0 || (s1 and 1) != 0) continue
-            val target = if (out.size == bands) out else FloatArray(bands)
-            System.arraycopy(histV[i], 0, target, 0, bands)
-            // Under the Java Memory Model, plain reads in arraycopy could theoretically be reordered
-            // past this second volatile read without VarHandle.acquireFence() (API 33+), but for visualizers
-            // an occasional torn frame is harmless.
+            System.arraycopy(src[i], 0, out, 0, count)
+            // Under the Java Memory Model without API 33 fences, plain array reads/writes can be reordered
+            // around the volatile sequence markers on ARM. For music visualizers, an occasional torn frame is harmless.
             val s2 = histSeq.get(i)
-            if (s1 == s2) return target
+            if (s1 == s2) return out
         }
         return null
     }
 
-    /** Waveform (-1..1) closest to [nanoTime], copied into [out] (must have size [wavePoints]). */
-    fun waveAt(nanoTime: Long, out: FloatArray = FloatArray(wavePoints)): FloatArray? {
-        for (attempt in 0 until 3) {
-            val i = frameAt(nanoTime) ?: return null
-            val s1 = histSeq.get(i)
-            if (s1 == 0 || (s1 and 1) != 0) continue
-            val target = if (out.size == wavePoints) out else FloatArray(wavePoints)
-            System.arraycopy(histWave[i], 0, target, 0, wavePoints)
-            // Under the Java Memory Model, plain reads in arraycopy could theoretically be reordered
-            // past this second volatile read without VarHandle.acquireFence() (API 33+), but for visualizers
-            // an occasional torn frame is harmless.
-            val s2 = histSeq.get(i)
-            if (s1 == s2) return target
-        }
-        return null
-    }
+    /** Levels (0..1) closest to [nanoTime], copied into [out] (must have size at least [bands]). */
+    fun levelsAt(nanoTime: Long, out: FloatArray): FloatArray? =
+        copyFrame(nanoTime, histV, bands, out)
+
+    /** Waveform (-1..1) closest to [nanoTime], copied into [out] (must have size at least [wavePoints]). */
+    fun waveAt(nanoTime: Long, out: FloatArray): FloatArray? =
+        copyFrame(nanoTime, histWave, wavePoints, out)
 
     /** Newest frame at or before [nanoTime]; walks back from the head, usually a few steps. */
     private fun frameAt(nanoTime: Long): Int? {
@@ -300,6 +291,9 @@ class Spectrum(
         peak = max(mags.max(), max(peak * 0.995f, 1e-3f))
         val h = head.get()
         val s = histSeq.get(h)
+        // Mark odd sequence number while writing. Note: under JMM on ARM, plain writes to histV/histWave
+        // that follow could theoretically be reordered before this release store, which (like reader reordering)
+        // could produce an occasional torn visualizer frame.
         histSeq.set(h, s + 1)
 
         val levels = histV[h]
