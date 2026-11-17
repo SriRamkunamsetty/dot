@@ -120,9 +120,10 @@ class DotDsp(private val params: DspParams) : BaseAudioProcessor() {
     override fun queueInput(inputBuffer: ByteBuffer) {
         val bytes = inputBuffer.remaining()
         if (bytes == 0) return
-        val cfg = params.current
         val out = replaceOutputBuffer(bytes)
         val input = inputBuffer.order(ByteOrder.nativeOrder())
+        // Read the settings once per buffer; everything below works from this snapshot.
+        val cfg = params.current
         if (!cfg.enabled) {
             out.put(input)
             out.flip()
