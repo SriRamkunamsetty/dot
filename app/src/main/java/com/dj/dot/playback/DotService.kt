@@ -3,9 +3,11 @@ package com.dj.dot.playback
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Process
 import android.util.Size
 import androidx.annotation.OptIn
 import androidx.media3.common.util.BitmapLoader
@@ -38,7 +40,7 @@ class DotService : MediaSessionService() {
                     session: MediaSession,
                     controller: MediaSession.ControllerInfo,
                 ): MediaSession.ConnectionResult {
-                    if (isControllerAllowed(session, controller, packageName)) {
+                    if (isControllerAllowed(session, controller, packageManager)) {
                         return super.onConnect(session, controller)
                     }
                     // Protect user listening privacy: untrusted controllers cannot read the queue or metadata.
@@ -53,13 +55,18 @@ class DotService : MediaSessionService() {
         fun isControllerAllowed(
             session: MediaSession,
             controller: MediaSession.ControllerInfo,
-            currentPackageName: String,
+            packageManager: PackageManager? = null,
         ): Boolean {
-            return session.isMediaNotificationController(controller) ||
-                session.isAutoCompanionController(controller) ||
-                controller.packageName == currentPackageName ||
-                controller.packageName == "com.android.bluetooth" ||
-                controller.isTrusted
+            if (controller.uid == Process.myUid() || controller.uid == Process.BLUETOOTH_UID || controller.isTrusted) {
+                return true
+            }
+            if (session.isAutoCompanionController(controller)) {
+                val packages = packageManager?.getPackagesForUid(controller.uid)
+                if (packages?.contains(controller.packageName) == true) {
+                    return true
+                }
+            }
+            return false
         }
     }
 
