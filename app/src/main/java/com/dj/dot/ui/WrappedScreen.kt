@@ -44,6 +44,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -110,32 +111,34 @@ fun WrappedScreen() {
     val hours by dot.store.hourMs.collectAsStateWithLifecycle()
     val shareLayer = rememberGraphicsLayer()
 
-    val stats = remember(lib, listen, daily, hours) {
-        val songs = listen.entries.mapNotNull { (id, ms) -> lib.byId[id]?.let { it to ms } }.sortedByDescending { it.second }
-        val artists = songs.groupBy { it.first.artist }
-            .map { (name, list) -> Triple(name, list.first().first, list.sumOf { it.second }) }
-            .sortedByDescending { it.third }
-        val cal = Calendar.getInstance()
-        val dayKey = { c: Calendar -> "%04d-%02d-%02d".format(c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH)) }
-        val dayName = SimpleDateFormat("EEE", Locale.getDefault())
-        val week = (6 downTo 0).map { back ->
-            val c = (cal.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, -back) }
-            dayName.format(c.time).take(1) to (daily[dayKey(c)] ?: 0L)
+    val stats by produceState<WrappedStats?>(null, lib, listen, daily, hours) {
+        value = withContext(Dispatchers.Default) {
+            val songs = listen.entries.mapNotNull { (id, ms) -> lib.byId[id]?.let { it to ms } }.sortedByDescending { it.second }
+            val artists = songs.groupBy { it.first.artist }
+                .map { (name, list) -> Triple(name, list.first().first, list.sumOf { it.second }) }
+                .sortedByDescending { it.third }
+            val cal = Calendar.getInstance()
+            val dayKey = { c: Calendar -> "%04d-%02d-%02d".format(c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH)) }
+            val dayName = SimpleDateFormat("EEE", Locale.getDefault())
+            val week = (6 downTo 0).map { back ->
+                val c = (cal.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, -back) }
+                dayName.format(c.time).take(1) to (daily[dayKey(c)] ?: 0L)
+            }
+            var streak = 0
+            val c = cal.clone() as Calendar
+            if ((daily[dayKey(c)] ?: 0L) < 60_000) c.add(Calendar.DAY_OF_YEAR, -1)
+            while ((daily[dayKey(c)] ?: 0L) >= 60_000) { streak++; c.add(Calendar.DAY_OF_YEAR, -1) }
+            WrappedStats(
+                totalMinutes = listen.values.sum() / 60_000,
+                since = dot.store.trackingSince,
+                topSongs = songs.take(5),
+                topArtists = artists.take(5),
+                hours = hours,
+                week = week,
+                streak = streak,
+                songsHeard = songs.size,
+            )
         }
-        var streak = 0
-        val c = cal.clone() as Calendar
-        if ((daily[dayKey(c)] ?: 0L) < 60_000) c.add(Calendar.DAY_OF_YEAR, -1)
-        while ((daily[dayKey(c)] ?: 0L) >= 60_000) { streak++; c.add(Calendar.DAY_OF_YEAR, -1) }
-        WrappedStats(
-            totalMinutes = listen.values.sum() / 60_000,
-            since = dot.store.trackingSince,
-            topSongs = songs.take(5),
-            topArtists = artists.take(5),
-            hours = hours,
-            week = week,
-            streak = streak,
-            songsHeard = songs.size,
-        )
     }
 
     fun share() = scope.launch {
@@ -155,9 +158,10 @@ fun WrappedScreen() {
         }
     }
 
+    val s = stats ?: return
     var showList by rememberSaveable { mutableStateOf(false) }
-    if (showList || stats.totalMinutes < 1) WrappedList(stats, shareLayer, onShare = { share() }, onBack = app::pop)
-    else WrappedStories(stats, shareLayer, onShare = { share() }, onAll = { showList = true }, onClose = app::pop)
+    if (showList || s.totalMinutes < 1) WrappedList(s, shareLayer, onShare = { share() }, onBack = app::pop)
+    else WrappedStories(s, shareLayer, onShare = { share() }, onAll = { showList = true }, onClose = app::pop)
 }
 
 /** Every stat on one scrolling page, with the shareable summary card on top. */

@@ -39,6 +39,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -48,6 +49,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -135,37 +138,41 @@ private fun SongsTab() {
     val lib by dot.library.data.collectAsStateWithLifecycle()
     val sort by dot.settings.songSort.flow.collectAsStateWithLifecycle()
     val state by dot.engine.state.collectAsStateWithLifecycle()
-    val songs = remember(lib, sort) {
-        when (sort) {
-            1 -> lib.songs.sortedWith(compareBy<Song, String>(String.CASE_INSENSITIVE_ORDER) { it.artist }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.album }.thenBy { it.track })
-            2 -> lib.songs.sortedByDescending { it.dateAdded }
-            else -> lib.songs
+    val songs by produceState<List<Song>?>(null, lib, sort) {
+        value = withContext(Dispatchers.Default) {
+            when (sort) {
+                1 -> lib.songs.sortedWith(compareBy<Song, String>(String.CASE_INSENSITIVE_ORDER) { it.artist }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.album }.thenBy { it.track })
+                2 -> lib.songs.sortedByDescending { it.dateAdded }
+                else -> lib.songs
+            }
         }
     }
     val currentId = state.current?.id
+    val songList = songs
 
     when {
         !lib.ready -> EmptyState("Scanning", "Looking for music on your phone")
-        songs.isEmpty() -> EmptyState("No music", "Copy songs into the Music folder and they'll show up here.")
+        songList == null -> Unit
+        songList.isEmpty() -> EmptyState("No music", "Copy songs into the Music folder and they'll show up here.")
         else -> Box(Modifier.fillMaxSize()) {
             val listState = rememberLazyListState()
             LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(bottom = 16.dp)) {
                 item(key = "header") {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Label(countOf(songs.size, "song"), Modifier.weight(1f))
+                        Label(countOf(songList.size, "song"), Modifier.weight(1f))
                         Pill(sortNames[sort], { dot.settings.songSort.set((sort + 1) % sortNames.size) })
                         Spacer(Modifier.width(8.dp))
-                        Pill("Shuffle", { dot.engine.playSongs(songs, shuffleAll = true) }, accent = true, icon = Icons.Rounded.Shuffle)
+                        Pill("Shuffle", { dot.engine.playSongs(songList, shuffleAll = true) }, accent = true, icon = Icons.Rounded.Shuffle)
                     }
                 }
-                itemsIndexed(songs, key = { _, s -> s.id }) { i, s ->
-                    SongRow(s, s.id == currentId, onClick = { dot.engine.playSongs(songs, i) }, onMore = { app.menu = SongMenu(s) })
+                itemsIndexed(songList, key = { _, s -> s.id }) { i, s ->
+                    SongRow(s, s.id == currentId, onClick = { dot.engine.playSongs(songList, i) }, onMore = { app.menu = SongMenu(s) })
                 }
             }
             FastScroller(
-                listState, songs.size, itemOffset = 1,
+                listState, songList.size, itemOffset = 1,
                 labelFor = { i ->
-                    val song = songs[i]
+                    val song = songList[i]
                     when (sort) {
                         1 -> initial(song.artist)
                         2 -> monthLabel.format(java.util.Date(song.dateAdded * 1000))
