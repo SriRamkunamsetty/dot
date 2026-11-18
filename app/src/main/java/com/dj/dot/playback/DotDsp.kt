@@ -140,6 +140,8 @@ class DotDsp(private val params: DspParams) : BaseAudioProcessor() {
         val levelling = cfg.levelling
         val monoTarget = if (cfg.mono) 1f else 0f
         val balance = cfg.balance
+        val hasBass = cfg.bassDb != 0f
+        val anyActiveBands = activeBands.any { it }
         val gk = gainStep
         val phaseStep = 2.0 * PI * 0.11 / rate // one turn around the head every ~9 s
 
@@ -158,12 +160,14 @@ class DotDsp(private val params: DspParams) : BaseAudioProcessor() {
 
             l *= preamp
             r *= preamp
-            for (b in 0 until DspParams.BAND_COUNT) {
-                if (!activeBands[b]) continue
-                l = eq[0][b].process(l)
-                r = eq[1][b].process(r)
+            if (anyActiveBands) {
+                for (b in 0 until DspParams.BAND_COUNT) {
+                    if (!activeBands[b]) continue
+                    l = eq[0][b].process(l)
+                    r = eq[1][b].process(r)
+                }
             }
-            if (cfg.bassDb != 0f || !shelf[0].settled) {
+            if (hasBass || !shelf[0].settled) {
                 l = shelf[0].process(l)
                 r = shelf[1].process(r)
             }
