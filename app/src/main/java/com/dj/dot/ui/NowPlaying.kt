@@ -111,9 +111,9 @@ fun NowPlayingScreen(onClose: () -> Unit) {
     val artStyleIndex by dot.settings.artStyle.flow.collectAsStateWithLifecycle()
     val artStyle = ArtStyle.entries[artStyleIndex.coerceIn(0, ArtStyle.entries.lastIndex)]
     // One analyser for the whole screen, so the cover, the strip and the controls share a beat.
-    // It only runs while the art is showing, as before, so lyrics and the queue don't keep the FFT busy.
+    // It only runs while the art is showing (or the visuals sheet is open), so lyrics and the queue don't keep the FFT busy.
     val needsAnalysis = showViz || artStyle == ArtStyle.DotArt || artStyle == ArtStyle.Halo
-    val viz = if (panel == Panel.Art && needsAnalysis) rememberVizState(engine.spectrum, state.playing) else null
+    val viz = if ((panel == Panel.Art && needsAnalysis) || visualsSheet) rememberVizState(engine.spectrum, state.playing) else null
     val tint = rememberArtTint(song)
     val glow by androidx.compose.animation.animateColorAsState(tint ?: Color.Transparent, tween(700), label = "glow")
     val wide = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -258,7 +258,7 @@ fun NowPlayingScreen(onClose: () -> Unit) {
     }
 
     if (sleepSheet) SleepSheet(onDismiss = { sleepSheet = false })
-    if (visualsSheet) VisualsSheet(song, state.playing, onDismiss = { visualsSheet = false })
+    if (visualsSheet && viz != null) VisualsSheet(song, state.playing, viz = viz, onDismiss = { visualsSheet = false })
 }
 
 @Composable
